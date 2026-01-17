@@ -31,77 +31,99 @@ syntax = "proto3";
 
 package snomed;
 
-// Core data types
+// SNOMED CT Concept
 message Concept {
-    uint64 id = 1;
-    uint32 effective_time = 2;
-    bool active = 3;
-    uint64 module_id = 4;
-    uint64 definition_status_id = 5;
+  uint64 id = 1;
+  uint32 effective_time = 2;
+  bool active = 3;
+  uint64 module_id = 4;
+  uint64 definition_status_id = 5;
+  string fsn = 6;  // Fully Specified Name
 }
 
+// SNOMED CT Description
 message Description {
-    uint64 id = 1;
-    uint32 effective_time = 2;
-    bool active = 3;
-    uint64 module_id = 4;
-    uint64 concept_id = 5;
-    string language_code = 6;
-    uint64 type_id = 7;
-    string term = 8;
-    uint64 case_significance_id = 9;
+  uint64 id = 1;
+  uint64 concept_id = 2;
+  string language_code = 3;
+  uint64 type_id = 4;
+  string term = 5;
+  bool active = 6;
 }
 
+// SNOMED CT Relationship
 message Relationship {
-    uint64 id = 1;
-    uint32 effective_time = 2;
-    bool active = 3;
-    uint64 module_id = 4;
-    uint64 source_id = 5;
-    uint64 destination_id = 6;
-    uint32 relationship_group = 7;
-    uint64 type_id = 8;
-    uint64 characteristic_type_id = 9;
-    uint64 modifier_id = 10;
+  uint64 id = 1;
+  uint64 source_id = 2;
+  uint64 destination_id = 3;
+  uint64 type_id = 4;
+  uint32 relationship_group = 5;
+  bool active = 6;
 }
 
 // Request/Response messages
 message GetConceptRequest {
-    uint64 id = 1;
+  uint64 id = 1;
 }
 
 message GetConceptResponse {
-    Concept concept = 1;
-    repeated Description descriptions = 2;
-    repeated Relationship relationships = 3;
+  Concept concept = 1;
+  repeated Description descriptions = 2;
+}
+
+message GetParentsRequest {
+  uint64 id = 1;
+}
+
+message GetParentsResponse {
+  repeated Concept parents = 1;
+}
+
+message GetChildrenRequest {
+  uint64 id = 1;
+}
+
+message GetChildrenResponse {
+  repeated Concept children = 1;
 }
 
 message SearchRequest {
-    string query = 1;
-    int32 limit = 2;
-    bool active_only = 3;
+  string query = 1;
+  int32 limit = 2;
+  bool active_only = 3;
 }
 
 message SearchResponse {
-    repeated SearchResult results = 1;
+  repeated Concept concepts = 1;
 }
 
-message SearchResult {
-    uint64 concept_id = 1;
-    string term = 2;
-    string fsn = 3;
-    bool active = 4;
+message IsDescendantOfRequest {
+  uint64 concept_id = 1;
+  uint64 ancestor_id = 2;
 }
 
-// Services
+message IsDescendantOfResponse {
+  bool is_descendant = 1;
+}
+
+// Service definitions
 service ConceptService {
-    rpc GetConcept(GetConceptRequest) returns (GetConceptResponse);
-    rpc GetParents(GetConceptRequest) returns (GetConceptsResponse);
-    rpc GetChildren(GetConceptRequest) returns (GetConceptsResponse);
+  // Get a concept by ID with descriptions
+  rpc GetConcept(GetConceptRequest) returns (GetConceptResponse);
+
+  // Get parent concepts (via IS_A relationships)
+  rpc GetParents(GetParentsRequest) returns (GetParentsResponse);
+
+  // Get child concepts (reverse IS_A)
+  rpc GetChildren(GetChildrenRequest) returns (GetChildrenResponse);
+
+  // Check if concept is descendant of another (subsumption)
+  rpc IsDescendantOf(IsDescendantOfRequest) returns (IsDescendantOfResponse);
 }
 
 service SearchService {
-    rpc Search(SearchRequest) returns (SearchResponse);
+  // Search concepts by term (case-insensitive substring match)
+  rpc Search(SearchRequest) returns (SearchResponse);
 }
 ```
 
@@ -188,25 +210,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Phase 1: Core Services
 - [x] Protocol buffer definitions
 - [x] Server skeleton
-- [ ] ConceptService implementation
-  - [ ] GetConcept
-  - [ ] GetParents
-  - [ ] GetChildren
-- [ ] SearchService implementation
-  - [ ] Basic term search
+- [x] ConceptService implementation
+  - [x] GetConcept - Returns concept with FSN and descriptions
+  - [x] GetParents - Returns direct IS_A parents
+  - [x] GetChildren - Returns direct IS_A children
+  - [x] IsDescendantOf - BFS-based subsumption check
+- [x] SearchService implementation
+  - [x] Basic term search (case-insensitive substring match)
 
 ### Phase 2: Enhanced Features
-- [ ] Hierarchy navigation (ancestors, descendants)
+- [x] Hierarchy navigation (ancestors via IsDescendantOf)
+- [ ] Full ancestors/descendants traversal endpoints
 - [ ] ECL (Expression Constraint Language) support
-- [ ] Subsumption testing
+  - [ ] Integration with snomed-ecl-executor
+  - [ ] ExecuteEcl RPC endpoint
 - [ ] MRCM validation endpoints
+  - [ ] ValidateExpression RPC
+  - [ ] GetAllowedAttributes RPC
 
 ### Phase 3: Production Ready
-- [ ] Health checks
+- [ ] Health checks (gRPC health protocol)
 - [ ] Metrics (Prometheus)
 - [ ] Configuration (TOML/YAML)
 - [ ] Docker support
-- [ ] REST gateway (grpc-gateway)
+- [ ] REST gateway (grpc-gateway or tonic-web)
+- [ ] Streaming responses for large result sets
+- [ ] Pagination support
 
 ## Client Usage
 
@@ -249,8 +278,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 grpcurl -plaintext -d '{"id": 73211009}' \
     localhost:50051 snomed.ConceptService/GetConcept
 
+# Get parents of a concept
+grpcurl -plaintext -d '{"id": 73211009}' \
+    localhost:50051 snomed.ConceptService/GetParents
+
+# Get children of a concept
+grpcurl -plaintext -d '{"id": 64572001}' \
+    localhost:50051 snomed.ConceptService/GetChildren
+
+# Check if concept is descendant of another (subsumption)
+grpcurl -plaintext -d '{"concept_id": 73211009, "ancestor_id": 64572001}' \
+    localhost:50051 snomed.ConceptService/IsDescendantOf
+
 # Search for terms
-grpcurl -plaintext -d '{"query": "diabetes", "limit": 10}' \
+grpcurl -plaintext -d '{"query": "diabetes", "limit": 10, "active_only": true}' \
     localhost:50051 snomed.SearchService/Search
 ```
 
