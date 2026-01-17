@@ -1,0 +1,19 @@
+[package]
+name = "snomed-rf2-turbo"
+version = "0.1.0"
+edition.workspace = true
+description = "Turbocharged parallel parser for SNOMED CT RF2 distribution files"
+license.workspace = true
+
+[features]
+default = ["parallel"]
+parallel = ["rayon"]
+
+[dependencies]
+snomed-types.workspace = true
+csv.workspace = true
+thiserror.workspace = true
+rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "snomed-types"
+version = "0.1.0"
+edition.workspace = true
+description = "Type definitions for SNOMED CT clinical terminology"
+license.workspace = true
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
