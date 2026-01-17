@@ -100,10 +100,12 @@ SctId (u64)
   - [x] In-memory store (`SnomedStore` with parallel loading)
   - [x] Filter traits (`DescriptionFilter`, `RelationshipFilter`)
   - [x] MRCM parsing (`MrcmStore`, domain/attribute parsers)
-- [ ] `snomed-service` crate
+- [x] `snomed-service` crate
   - [x] Project skeleton with gRPC setup
   - [x] Protocol buffer definitions
-  - [ ] Service implementations
+  - [x] ConceptService (GetConcept, GetParents, GetChildren, IsDescendantOf)
+  - [x] SearchService (term search)
+  - [ ] ECL execution endpoint (planned)
   - [ ] REST gateway (optional)
 
 ## References
