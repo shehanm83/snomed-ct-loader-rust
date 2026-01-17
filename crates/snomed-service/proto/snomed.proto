@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package snomed;
+
+// SNOMED CT Concept
+message Concept {
+  uint64 id = 1;
+  uint32 effective_time = 2;
+  bool active = 3;
+  uint64 module_id = 4;
+  uint64 definition_status_id = 5;
+  string fsn = 6;  // Fully Specified Name
+}
+
+// SNOMED CT Description
+message Description {
+  uint64 id = 1;
+  uint64 concept_id = 2;
+  string language_code = 3;
+  uint64 type_id = 4;
+  string term = 5;
+  bool active = 6;
+}
+
+// SNOMED CT Relationship
+message Relationship {
+  uint64 id = 1;
+  uint64 source_id = 2;
+  uint64 destination_id = 3;
+  uint64 type_id = 4;
+  uint32 relationship_group = 5;
+  bool active = 6;
+}
+
+// Request/Response messages
+message GetConceptRequest {
+  uint64 id = 1;
+}
+
+message GetConceptResponse {
+  Concept concept = 1;
+  repeated Description descriptions = 2;
+}
+
+message GetParentsRequest {
+  uint64 id = 1;
+}
+
+message GetParentsResponse {
+  repeated Concept parents = 1;
+}
+
+message GetChildrenRequest {
+  uint64 id = 1;
+}
+
+message GetChildrenResponse {
+  repeated Concept children = 1;
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 limit = 2;
+  bool active_only = 3;
+}
+
+message SearchResponse {
+  repeated Concept concepts = 1;
+}
+
+message IsDescendantOfRequest {
+  uint64 concept_id = 1;
+  uint64 ancestor_id = 2;
+}
+
+message IsDescendantOfResponse {
+  bool is_descendant = 1;
+}
+
+// Service definitions
+service ConceptService {
+  // Get a concept by ID
+  rpc GetConcept(GetConceptRequest) returns (GetConceptResponse);
+
+  // Get parent concepts (via IS_A relationships)
+  rpc GetParents(GetParentsRequest) returns (GetParentsResponse);
+
+  // Get child concepts (reverse IS_A)
+  rpc GetChildren(GetChildrenRequest) returns (GetChildrenResponse);
+
+  // Check if concept is descendant of another
+  rpc IsDescendantOf(IsDescendantOfRequest) returns (IsDescendantOfResponse);
+}
+
+service SearchService {
+  // Search concepts by term
+  rpc Search(SearchRequest) returns (SearchResponse);
+}

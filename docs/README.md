@@ -11,8 +11,9 @@ This documentation explains the architecture and implementation of the SNOMED CT
 | [01-architecture-overview.md](01-architecture-overview.md) | Project structure and crate responsibilities |
 | [02-snomed-ct-basics.md](02-snomed-ct-basics.md) | Introduction to SNOMED CT concepts |
 | [03-snomed-types-crate.md](03-snomed-types-crate.md) | Detailed explanation of the types crate |
-| [04-snomed-loader-crate.md](04-snomed-loader-crate.md) | Parser crate design (to be implemented) |
+| [04-snomed-loader-crate.md](04-snomed-loader-crate.md) | Parser and loader crate implementation |
 | [05-mrcm-explained.md](05-mrcm-explained.md) | Machine Readable Concept Model deep dive |
+| [06-snomed-service-crate.md](06-snomed-service-crate.md) | gRPC service layer for API access |
 
 ## Quick Start
 
@@ -50,8 +51,11 @@ snomed-ct-loader-rust/
 ├── snomed-types/        # Pure data structures
 │   └── Rf2Concept, Rf2Description, Rf2Relationship, MRCM types
 │
-└── snomed-loader/       # Parser & I/O
-    └── File loading, CSV parsing, parallel processing
+├── snomed-loader/       # Parser & I/O
+│   └── File loading, CSV parsing, parallel processing, in-memory store
+│
+└── snomed-service/      # gRPC API
+    └── REST/gRPC service layer for querying SNOMED CT data
 ```
 
 ### Type Hierarchy
@@ -88,13 +92,19 @@ SctId (u64)
   - [x] Rf2Concept
   - [x] Rf2Description
   - [x] Rf2Relationship
-  - [x] MRCM types
-- [ ] `snomed-loader` crate
-  - [ ] Error types and configuration
-  - [ ] Generic RF2 parser
-  - [ ] File discovery
-  - [ ] In-memory store
-  - [ ] MRCM parsing
+  - [x] MRCM types (Cardinality, MrcmDomain, MrcmAttributeDomain, MrcmAttributeRange)
+- [x] `snomed-loader` crate
+  - [x] Error types and configuration (`Rf2Error`, `Rf2Config`, `DescriptionConfig`, `RelationshipConfig`)
+  - [x] Generic RF2 parser (`Rf2Parser`, `Rf2Record` trait)
+  - [x] File discovery (`discover_rf2_files`, `Rf2Files`)
+  - [x] In-memory store (`SnomedStore` with parallel loading)
+  - [x] Filter traits (`DescriptionFilter`, `RelationshipFilter`)
+  - [x] MRCM parsing (`MrcmStore`, domain/attribute parsers)
+- [ ] `snomed-service` crate
+  - [x] Project skeleton with gRPC setup
+  - [x] Protocol buffer definitions
+  - [ ] Service implementations
+  - [ ] REST gateway (optional)
 
 ## References
 
