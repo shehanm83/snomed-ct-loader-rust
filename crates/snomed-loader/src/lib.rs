@@ -1,6 +1,6 @@
-//! # snomed-rf2-turbo
+//! # snomed-loader
 //!
-//! Turbocharged parallel parser for SNOMED CT RF2 distribution files.
+//! High-performance parser for SNOMED CT RF2 distribution files.
 //!
 //! This crate will be implemented in the next phase.
 

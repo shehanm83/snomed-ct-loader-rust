@@ -11,7 +11,7 @@ This documentation explains the architecture and implementation of the SNOMED CT
 | [01-architecture-overview.md](01-architecture-overview.md) | Project structure and crate responsibilities |
 | [02-snomed-ct-basics.md](02-snomed-ct-basics.md) | Introduction to SNOMED CT concepts |
 | [03-snomed-types-crate.md](03-snomed-types-crate.md) | Detailed explanation of the types crate |
-| [04-snomed-rf2-turbo-crate.md](04-snomed-rf2-turbo-crate.md) | Parser crate design (to be implemented) |
+| [04-snomed-loader-crate.md](04-snomed-loader-crate.md) | Parser crate design (to be implemented) |
 | [05-mrcm-explained.md](05-mrcm-explained.md) | Machine Readable Concept Model deep dive |
 
 ## Quick Start
@@ -50,7 +50,7 @@ snomed-ct-loader-rust/
 ├── snomed-types/        # Pure data structures
 │   └── Rf2Concept, Rf2Description, Rf2Relationship, MRCM types
 │
-└── snomed-rf2-turbo/    # Parser & I/O
+└── snomed-loader/       # Parser & I/O
     └── File loading, CSV parsing, parallel processing
 ```
 
@@ -89,7 +89,7 @@ SctId (u64)
   - [x] Rf2Description
   - [x] Rf2Relationship
   - [x] MRCM types
-- [ ] `snomed-rf2-turbo` crate
+- [ ] `snomed-loader` crate
   - [ ] Error types and configuration
   - [ ] Generic RF2 parser
   - [ ] File discovery

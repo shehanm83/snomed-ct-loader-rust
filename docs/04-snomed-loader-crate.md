@@ -1,15 +1,15 @@
-# snomed-rf2-turbo Crate
+# snomed-loader Crate
 
 ## Overview
 
-The `snomed-rf2-turbo` crate provides high-performance RF2 file parsing with optional parallel processing.
+The `snomed-loader` crate provides high-performance RF2 file parsing with optional parallel processing.
 
 > **Status**: To be implemented in next phase
 
 ## Planned Module Structure
 
 ```
-snomed-rf2-turbo/src/
+snomed-loader/src/
 ├── lib.rs           # Public API exports
 ├── types.rs         # Parser-specific types (errors, configs)
 ├── parser.rs        # Generic RF2 parser
@@ -190,7 +190,7 @@ With parallel parsing enabled:
 ## Planned Usage
 
 ```rust
-use snomed_rf2_turbo::{discover_rf2_files, SnomedStore};
+use snomed_loader::{discover_rf2_files, SnomedStore};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Discover files

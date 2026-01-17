@@ -23,7 +23,7 @@ snomed-ct-loader-rust/
     │       ├── relationship.rs
     │       └── mrcm.rs
     │
-    └── snomed-rf2-turbo/               # Parser & Loader (I/O)
+    └── snomed-loader/                  # Parser & Loader (I/O)
         └── src/
             ├── lib.rs
             ├── types.rs
@@ -46,7 +46,7 @@ snomed-ct-loader-rust/
 
 **Dependencies**: Only `serde` (optional)
 
-### snomed-rf2-turbo
+### snomed-loader
 
 **Purpose**: High-performance RF2 file parsing and loading.
 
@@ -67,7 +67,7 @@ snomed-ct-loader-rust/
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    snomed-rf2-turbo                             │
+│                      snomed-loader                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
 │  │   loader    │  │   parser    │  │   store     │              │
 │  │ (discover)  │─▶│  (parse)    │─▶│  (store)    │              │

@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/snomed-types",
-    "crates/snomed-rf2-turbo",
+    "crates/snomed-loader",
 ]
 
 [workspace.package]
@@ -13,7 +13,7 @@ license = "MIT"
 [workspace.dependencies]
 # Internal crates
 snomed-types = { path = "crates/snomed-types" }
-snomed-rf2-turbo = { path = "crates/snomed-rf2-turbo" }
+snomed-loader = { path = "crates/snomed-loader" }
 
 # External dependencies
 csv = "1.3"
