@@ -105,3 +105,9 @@ pub use snomed_ecl_executor::{
 };
 // Also re-export the module for accessing nested types
 pub use snomed_ecl_executor;
+
+// Re-export optimizer types for performance optimization
+pub use snomed_ecl_optimizer::{
+    TransitiveClosure, EclFilterService,
+    ConceptBitSet, ConceptIdRegistry,
+};

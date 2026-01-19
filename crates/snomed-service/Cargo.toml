@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 snomed-types.workspace = true
 snomed-loader.workspace = true
+snomed-ecl-optimizer.workspace = true
 tonic.workspace = true
 prost.workspace = true
 tokio.workspace = true

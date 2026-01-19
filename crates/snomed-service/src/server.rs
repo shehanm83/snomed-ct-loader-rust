@@ -131,22 +131,10 @@ impl ConceptService for SnomedServer {
         let concept_id = req.concept_id;
         let ancestor_id = req.ancestor_id;
 
-        // Simple BFS to check ancestry
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = vec![concept_id];
+        // Use optimized O(1) lookup if transitive closure is built
+        let is_descendant = self.store.is_descendant_of(concept_id, ancestor_id);
 
-        while let Some(current) = queue.pop() {
-            if current == ancestor_id {
-                return Ok(Response::new(IsDescendantOfResponse { is_descendant: true }));
-            }
-
-            if visited.insert(current) {
-                let parents = self.store.get_parents(current);
-                queue.extend(parents);
-            }
-        }
-
-        Ok(Response::new(IsDescendantOfResponse { is_descendant: false }))
+        Ok(Response::new(IsDescendantOfResponse { is_descendant }))
     }
 }
 

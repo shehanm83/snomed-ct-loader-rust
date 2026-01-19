@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load data into store
     let mut store = SnomedStore::new();
 
-    tracing::info!("Loading concepts...");
+    tracing::info!("Loading concepts, descriptions, and relationships...");
     store.load_all(&files)?;
 
     tracing::info!(
@@ -46,6 +46,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.description_count(),
         store.relationship_count()
     );
+
+    // Load MRCM constraints if available
+    tracing::info!("Loading MRCM constraints...");
+    if let Err(e) = store.load_mrcm(&files) {
+        tracing::warn!("Could not load MRCM data: {}", e);
+    } else if store.has_mrcm() {
+        tracing::info!("MRCM constraints loaded successfully");
+    }
+
+    // Load reference sets if available
+    tracing::info!("Loading reference sets...");
+    match store.load_simple_refsets(&files, snomed_loader::Rf2Config::default()) {
+        Ok(count) => tracing::info!("Loaded {} refset members across {} refsets", count, store.refset_count()),
+        Err(e) => tracing::warn!("Could not load refsets: {}", e),
+    }
+
+    // Build transitive closure for O(1) hierarchy queries
+    tracing::info!("Building transitive closure for optimized hierarchy queries...");
+    store.build_transitive_closure();
+    tracing::info!("Transitive closure built - hierarchy queries now O(1)");
 
     // Create server
     let server = SnomedServer::new(store);

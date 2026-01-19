@@ -2,6 +2,21 @@
 //!
 //! Provides efficient storage and lookup for parsed RF2 data.
 //! Includes parallel parsing support via rayon for maximum performance.
+//!
+//! ## Optimized Hierarchy Queries
+//!
+//! After loading data, call `build_transitive_closure()` to enable O(1)
+//! ancestor and descendant lookups instead of BFS traversal.
+//!
+//! ```ignore
+//! let mut store = SnomedStore::new();
+//! store.load_all(&files)?;
+//! store.build_transitive_closure(); // One-time O(n*d) build
+//!
+//! // Now these are O(1) lookups:
+//! let ancestors = store.get_all_ancestors(concept_id);
+//! let is_descendant = store.is_descendant_of(child, ancestor);
+//! ```
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -11,6 +26,7 @@ use std::path::Path;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+use snomed_ecl_optimizer::TransitiveClosure;
 use snomed_types::{Rf2Concept, Rf2Description, Rf2Relationship, Rf2SimpleRefsetMember, SctId};
 
 use crate::description::DescriptionFilter;
@@ -36,7 +52,15 @@ use crate::types::{DescriptionConfig, Rf2Config, Rf2Files, Rf2Result, Relationsh
 ///     println!("Found: {:?}", concept);
 /// }
 /// ```
-#[derive(Debug, Default)]
+///
+/// # Optimized Hierarchy Queries
+///
+/// For O(1) ancestor/descendant lookups, build the transitive closure after loading:
+///
+/// ```ignore
+/// store.build_transitive_closure();
+/// let ancestors = store.get_all_ancestors(concept_id);
+/// ```
 pub struct SnomedStore {
     /// Concepts indexed by SCTID.
     concepts: HashMap<SctId, Rf2Concept>,
@@ -51,6 +75,37 @@ pub struct SnomedStore {
     refsets_by_id: HashMap<SctId, Vec<SctId>>,
     /// MRCM data (optional).
     mrcm: Option<MrcmStore>,
+    /// Precomputed transitive closure for O(1) hierarchy lookups (optional).
+    /// Call `build_transitive_closure()` after loading to enable.
+    transitive_closure: Option<TransitiveClosure>,
+}
+
+impl Default for SnomedStore {
+    fn default() -> Self {
+        Self {
+            concepts: HashMap::new(),
+            descriptions_by_concept: HashMap::new(),
+            relationships_by_source: HashMap::new(),
+            relationships_by_destination: HashMap::new(),
+            refsets_by_id: HashMap::new(),
+            mrcm: None,
+            transitive_closure: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for SnomedStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SnomedStore")
+            .field("concepts", &self.concepts.len())
+            .field("descriptions_by_concept", &self.descriptions_by_concept.len())
+            .field("relationships_by_source", &self.relationships_by_source.len())
+            .field("relationships_by_destination", &self.relationships_by_destination.len())
+            .field("refsets_by_id", &self.refsets_by_id.len())
+            .field("mrcm", &self.mrcm.is_some())
+            .field("transitive_closure", &self.transitive_closure.is_some())
+            .finish()
+    }
 }
 
 impl SnomedStore {
@@ -74,6 +129,7 @@ impl SnomedStore {
             relationships_by_destination: HashMap::with_capacity(concept_count),
             refsets_by_id: HashMap::new(),
             mrcm: None,
+            transitive_closure: None,
         }
     }
 
@@ -531,6 +587,173 @@ impl SnomedStore {
             })
             .unwrap_or_default()
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TRANSITIVE CLOSURE - O(1) HIERARCHY QUERIES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Builds the transitive closure for O(1) ancestor/descendant lookups.
+    ///
+    /// This is a one-time operation that precomputes all ancestor and descendant
+    /// relationships. After calling this method, hierarchy queries like
+    /// `get_all_ancestors()`, `get_all_descendants()`, and `is_descendant_of()`
+    /// become O(1) operations instead of requiring BFS traversal.
+    ///
+    /// # Performance
+    ///
+    /// - Build time: O(n × d) where n = concepts, d = average hierarchy depth
+    /// - Memory: Stores all transitive relationships (can be significant)
+    /// - Query time after build: O(1)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut store = SnomedStore::new();
+    /// store.load_all(&files)?;
+    /// store.build_transitive_closure();
+    ///
+    /// // Now O(1) lookups:
+    /// let ancestors = store.get_all_ancestors(concept_id);
+    /// let is_desc = store.is_descendant_of(child, ancestor);
+    /// ```
+    pub fn build_transitive_closure(&mut self) {
+        let closure = TransitiveClosure::build(self);
+        self.transitive_closure = Some(closure);
+    }
+
+    /// Returns true if the transitive closure has been built.
+    pub fn has_transitive_closure(&self) -> bool {
+        self.transitive_closure.is_some()
+    }
+
+    /// Gets all ancestors of a concept (O(1) if transitive closure is built).
+    ///
+    /// Returns all concepts that are ancestors of the given concept via IS_A
+    /// relationships. If the transitive closure has not been built, falls back
+    /// to BFS traversal.
+    pub fn get_all_ancestors(&self, concept_id: SctId) -> Vec<SctId> {
+        if let Some(ref closure) = self.transitive_closure {
+            closure
+                .get_ancestors(concept_id)
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default()
+        } else {
+            // Fallback to BFS if closure not built
+            self.compute_ancestors_bfs(concept_id)
+        }
+    }
+
+    /// Gets all ancestors of a concept including itself.
+    pub fn get_all_ancestors_or_self(&self, concept_id: SctId) -> Vec<SctId> {
+        if let Some(ref closure) = self.transitive_closure {
+            closure.get_ancestors_or_self(concept_id).into_iter().collect()
+        } else {
+            let mut result = self.compute_ancestors_bfs(concept_id);
+            if !result.contains(&concept_id) {
+                result.push(concept_id);
+            }
+            result
+        }
+    }
+
+    /// Gets all descendants of a concept (O(1) if transitive closure is built).
+    ///
+    /// Returns all concepts that are descendants of the given concept via IS_A
+    /// relationships. If the transitive closure has not been built, falls back
+    /// to BFS traversal.
+    pub fn get_all_descendants(&self, concept_id: SctId) -> Vec<SctId> {
+        if let Some(ref closure) = self.transitive_closure {
+            closure
+                .get_descendants(concept_id)
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default()
+        } else {
+            // Fallback to BFS if closure not built
+            self.compute_descendants_bfs(concept_id)
+        }
+    }
+
+    /// Gets all descendants of a concept including itself.
+    pub fn get_all_descendants_or_self(&self, concept_id: SctId) -> Vec<SctId> {
+        if let Some(ref closure) = self.transitive_closure {
+            closure.get_descendants_or_self(concept_id).into_iter().collect()
+        } else {
+            let mut result = self.compute_descendants_bfs(concept_id);
+            if !result.contains(&concept_id) {
+                result.push(concept_id);
+            }
+            result
+        }
+    }
+
+    /// Checks if a concept is a descendant of another (O(1) if closure built).
+    ///
+    /// Returns true if `descendant` is a descendant of `ancestor` via IS_A
+    /// relationships (not including self).
+    pub fn is_descendant_of(&self, descendant: SctId, ancestor: SctId) -> bool {
+        if let Some(ref closure) = self.transitive_closure {
+            closure.is_descendant_of(descendant, ancestor)
+        } else {
+            self.get_all_ancestors(descendant).contains(&ancestor)
+        }
+    }
+
+    /// Checks if a concept is an ancestor of another (O(1) if closure built).
+    pub fn is_ancestor_of(&self, ancestor: SctId, descendant: SctId) -> bool {
+        if let Some(ref closure) = self.transitive_closure {
+            closure.is_ancestor_of(ancestor, descendant)
+        } else {
+            self.get_all_descendants(ancestor).contains(&descendant)
+        }
+    }
+
+    /// BFS fallback for computing ancestors when closure not available.
+    fn compute_ancestors_bfs(&self, concept_id: SctId) -> Vec<SctId> {
+        use std::collections::{HashSet, VecDeque};
+
+        let mut ancestors = HashSet::new();
+        let mut queue = VecDeque::new();
+
+        for parent in self.get_parents(concept_id) {
+            queue.push_back(parent);
+        }
+
+        while let Some(current) = queue.pop_front() {
+            if ancestors.insert(current) {
+                for parent in self.get_parents(current) {
+                    queue.push_back(parent);
+                }
+            }
+        }
+
+        ancestors.into_iter().collect()
+    }
+
+    /// BFS fallback for computing descendants when closure not available.
+    fn compute_descendants_bfs(&self, concept_id: SctId) -> Vec<SctId> {
+        use std::collections::{HashSet, VecDeque};
+
+        let mut descendants = HashSet::new();
+        let mut queue = VecDeque::new();
+
+        for child in self.get_children(concept_id) {
+            queue.push_back(child);
+        }
+
+        while let Some(current) = queue.pop_front() {
+            if descendants.insert(current) {
+                for child in self.get_children(current) {
+                    queue.push_back(child);
+                }
+            }
+        }
+
+        descendants.into_iter().collect()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REFERENCE SET QUERIES
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /// Gets members of a reference set by refset ID.
     ///
