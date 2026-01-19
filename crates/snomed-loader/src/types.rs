@@ -234,6 +234,10 @@ pub struct Rf2Files {
     pub mrcm_attribute_domain: Option<PathBuf>,
     /// Path to MRCM Attribute Range reference set file.
     pub mrcm_attribute_range: Option<PathBuf>,
+    /// Paths to simple reference set files.
+    pub simple_refset_files: Vec<PathBuf>,
+    /// Paths to language reference set files.
+    pub language_refset_files: Vec<PathBuf>,
     /// Release date extracted from filename (YYYYMMDD).
     pub release_date: Option<String>,
 }

@@ -15,5 +15,9 @@ csv.workspace = true
 thiserror.workspace = true
 rayon = { workspace = true, optional = true }
 
+# ECL (Expression Constraint Language) support
+snomed-ecl.workspace = true
+snomed-ecl-executor.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true

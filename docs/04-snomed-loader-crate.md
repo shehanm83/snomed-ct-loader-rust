@@ -16,6 +16,7 @@ snomed-loader/src/
 ├── description.rs      # Rf2Record impl + DescriptionFilter trait
 ├── relationship.rs     # Rf2Record impl + RelationshipFilter trait
 ├── store.rs            # In-memory data store with parallel loading
+├── ecl.rs              # EclQueryable trait implementation for SnomedStore
 └── mrcm/
     ├── mod.rs          # MRCM module exports
     ├── domain.rs       # MrcmDomain parser
@@ -319,6 +320,64 @@ pub use mrcm::parse_attribute_range_file;
 ```
 
 See [05-mrcm-explained.md](05-mrcm-explained.md) for details.
+
+## ECL (Expression Constraint Language) Support
+
+The `snomed-loader` crate implements the `EclQueryable` trait from `snomed-ecl-executor`, enabling ECL queries to be executed against `SnomedStore`.
+
+### Dependencies
+
+ECL support is provided via the `snomed-ecl` and `snomed-ecl-executor` crates from the [snomed-ecl-rust](https://github.com/shehanm83/snomed-ecl-rust) repository.
+
+### Re-exports
+
+```rust
+// ECL types re-exported for convenience
+pub use snomed_ecl;
+pub use snomed_ecl_executor::{EclExecutor, EclQueryable, ExecutorConfig, QueryResult};
+```
+
+### Usage
+
+```rust
+use snomed_loader::{discover_rf2_files, SnomedStore, EclExecutor};
+
+// Load SNOMED CT data
+let files = discover_rf2_files("path/to/release")?;
+let mut store = SnomedStore::new();
+store.load_all(&files)?;
+
+// Create ECL executor
+let executor = EclExecutor::new(&store);
+
+// Execute ECL query - descendants of Diabetes mellitus
+let result = executor.execute("<< 73211009")?;
+println!("Found {} concepts", result.count());
+
+for concept_id in result.iter().take(10) {
+    println!("  {}", concept_id);
+}
+
+// Check if a concept matches an ECL expression
+let matches = executor.matches(46635009, "<< 73211009")?;
+println!("Type 1 diabetes is a diabetes: {}", matches);
+
+// Get all ancestors/descendants
+let ancestors = executor.get_ancestors(46635009);
+let descendants = executor.get_descendants(73211009);
+```
+
+### Supported ECL Operations
+
+- `*` - Wildcard (all concepts)
+- `< id` - Descendants of
+- `<< id` - Descendant or self
+- `> id` - Ancestors of
+- `>> id` - Ancestor or self
+- `! id` - All except
+- `AND`, `OR`, `MINUS` - Set operations
+- `{ attr = value }` - Attribute refinement
+- `( expr )` - Grouping
 
 ## Feature Flags
 

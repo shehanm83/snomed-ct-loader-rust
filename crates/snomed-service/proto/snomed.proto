@@ -96,3 +96,182 @@ service SearchService {
   // Search concepts by term
   rpc Search(SearchRequest) returns (SearchResponse);
 }
+
+// ============================================================================
+// ECL (Expression Constraint Language) Service
+// ============================================================================
+
+// Configuration for ECL query execution
+message EclExecutorConfig {
+  // Query timeout in milliseconds (0 = no timeout)
+  uint64 timeout_ms = 1;
+  // Enable parallel execution for large queries
+  bool parallel = 2;
+  // Enable query result caching
+  bool enable_cache = 3;
+}
+
+// Request to execute an ECL expression
+message ExecuteEclRequest {
+  // The ECL expression to execute (e.g., "<< 73211009")
+  string ecl = 1;
+  // Maximum number of results to return (0 = unlimited)
+  int32 limit = 2;
+  // Whether to include concept details (FSN) in results
+  bool include_details = 3;
+  // Optional executor configuration
+  EclExecutorConfig config = 4;
+}
+
+// Response containing ECL query results
+message ExecuteEclResponse {
+  // Matching concept IDs (if include_details is false)
+  repeated uint64 concept_ids = 1;
+  // Matching concepts with details (if include_details is true)
+  repeated Concept concepts = 2;
+  // Total count of matching concepts
+  uint64 total_count = 3;
+  // Execution time in milliseconds
+  uint64 execution_time_ms = 4;
+  // Whether results were truncated due to limit
+  bool truncated = 5;
+}
+
+// Request to check if a concept matches an ECL expression
+message MatchesEclRequest {
+  // The concept ID to test
+  uint64 concept_id = 1;
+  // The ECL expression to match against
+  string ecl = 2;
+}
+
+// Response indicating whether concept matches ECL
+message MatchesEclResponse {
+  // True if the concept matches the ECL expression
+  bool matches = 1;
+}
+
+// Request to get descendants with optional depth limit
+message GetDescendantsRequest {
+  // The concept ID to get descendants of
+  uint64 concept_id = 1;
+  // Maximum number of results (0 = unlimited)
+  int32 limit = 2;
+  // Whether to include the concept itself (descendant-or-self)
+  bool include_self = 3;
+}
+
+// Response containing descendant concepts
+message GetDescendantsResponse {
+  // Descendant concept IDs
+  repeated uint64 concept_ids = 1;
+  // Total count
+  uint64 total_count = 2;
+}
+
+// Request to get ancestors
+message GetAncestorsRequest {
+  // The concept ID to get ancestors of
+  uint64 concept_id = 1;
+  // Whether to include the concept itself (ancestor-or-self)
+  bool include_self = 2;
+}
+
+// Response containing ancestor concepts
+message GetAncestorsResponse {
+  // Ancestor concept IDs
+  repeated uint64 concept_ids = 1;
+  // Total count
+  uint64 total_count = 2;
+}
+
+// Request to explain an ECL query plan
+message ExplainEclRequest {
+  // The ECL expression to explain
+  string ecl = 1;
+}
+
+// Query plan step for explanation
+message QueryPlanStep {
+  // Type of operation (e.g., "Descendants", "Intersection", "Union")
+  string operation = 1;
+  // Human-readable description of this step
+  string description = 2;
+  // Estimated result count (if available)
+  uint64 estimated_count = 3;
+  // Child steps (for nested operations)
+  repeated QueryPlanStep children = 4;
+}
+
+// Response containing ECL query explanation
+message ExplainEclResponse {
+  // The parsed ECL expression (normalized form)
+  string parsed_ecl = 1;
+  // Query execution plan
+  QueryPlanStep plan = 2;
+  // Parse time in microseconds
+  uint64 parse_time_us = 3;
+}
+
+// Request to check subsumption between two concepts
+message IsSubsumedByRequest {
+  // The concept to check (potential descendant)
+  uint64 concept_id = 1;
+  // The potential ancestor concept
+  uint64 ancestor_id = 2;
+}
+
+// Response indicating subsumption result
+message IsSubsumedByResponse {
+  // True if concept_id is subsumed by (is-a) ancestor_id
+  bool is_subsumed = 1;
+  // Distance in hierarchy (-1 if not subsumed, 0 if same concept)
+  int32 distance = 2;
+}
+
+// Request to get direct parents (one level up)
+message GetDirectParentsRequest {
+  uint64 concept_id = 1;
+}
+
+// Response with direct parent concept IDs
+message GetDirectParentsResponse {
+  repeated uint64 parent_ids = 1;
+}
+
+// Request to get direct children (one level down)
+message GetDirectChildrenRequest {
+  uint64 concept_id = 1;
+}
+
+// Response with direct child concept IDs
+message GetDirectChildrenResponse {
+  repeated uint64 child_ids = 1;
+}
+
+// ECL query execution service
+service EclService {
+  // Execute an ECL expression and return matching concepts
+  rpc ExecuteEcl(ExecuteEclRequest) returns (ExecuteEclResponse);
+
+  // Check if a concept matches an ECL expression
+  rpc MatchesEcl(MatchesEclRequest) returns (MatchesEclResponse);
+
+  // Explain the query plan for an ECL expression (debugging/optimization)
+  rpc ExplainEcl(ExplainEclRequest) returns (ExplainEclResponse);
+
+  // Check if a concept is subsumed by another (direct subsumption test)
+  rpc IsSubsumedBy(IsSubsumedByRequest) returns (IsSubsumedByResponse);
+
+  // Get all descendants of a concept (optimized traversal)
+  rpc GetDescendants(GetDescendantsRequest) returns (GetDescendantsResponse);
+
+  // Get all ancestors of a concept (optimized traversal)
+  rpc GetAncestors(GetAncestorsRequest) returns (GetAncestorsResponse);
+
+  // Get direct parents (one level, via IS_A)
+  rpc GetDirectParents(GetDirectParentsRequest) returns (GetDirectParentsResponse);
+
+  // Get direct children (one level, reverse IS_A)
+  rpc GetDirectChildren(GetDirectChildrenRequest) returns (GetDirectChildrenResponse);
+}

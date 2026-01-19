@@ -100,12 +100,15 @@ SctId (u64)
   - [x] In-memory store (`SnomedStore` with parallel loading)
   - [x] Filter traits (`DescriptionFilter`, `RelationshipFilter`)
   - [x] MRCM parsing (`MrcmStore`, domain/attribute parsers)
+- [x] `snomed-loader` ECL integration
+  - [x] EclQueryable trait implementation for SnomedStore
+  - [x] ECL executor re-exports
 - [x] `snomed-service` crate
   - [x] Project skeleton with gRPC setup
   - [x] Protocol buffer definitions
   - [x] ConceptService (GetConcept, GetParents, GetChildren, IsDescendantOf)
   - [x] SearchService (term search)
-  - [ ] ECL execution endpoint (planned)
+  - [x] EclService (ExecuteEcl, MatchesEcl, GetDescendants, GetAncestors)
   - [ ] REST gateway (optional)
 
 ## References

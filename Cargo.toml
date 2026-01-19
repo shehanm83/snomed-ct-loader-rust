@@ -17,6 +17,10 @@ snomed-types = { path = "crates/snomed-types" }
 snomed-loader = { path = "crates/snomed-loader" }
 snomed-service = { path = "crates/snomed-service" }
 
+# ECL (Expression Constraint Language)
+snomed-ecl = { git = "https://github.com/shehanm83/snomed-ecl-rust.git" }
+snomed-ecl-executor = { git = "https://github.com/shehanm83/snomed-ecl-rust.git" }
+
 # Parsing & Data
 csv = "1.3"
 thiserror = "2.0"

@@ -2,9 +2,9 @@
 
 ## Overview
 
-The `snomed-service` crate provides a gRPC-based API service for querying SNOMED CT data. It builds on top of `snomed-loader` to provide network-accessible terminology services.
+The `snomed-service` crate provides a gRPC-based API service for querying SNOMED CT data. It builds on top of `snomed-loader` to provide network-accessible terminology services including ECL (Expression Constraint Language) query support.
 
-> **Status**: Skeleton implemented, service logic pending
+> **Status**: Fully implemented with ConceptService, SearchService, and EclService
 
 ## Module Structure
 
@@ -17,10 +17,36 @@ snomed-service/
 └── src/
     ├── lib.rs            # Library exports
     ├── main.rs           # Server binary entry point
-    ├── server.rs         # SnomedServer implementation
+    ├── server.rs         # SnomedServer implementation (all services)
     └── services/
-        └── mod.rs        # Service implementations
+        └── mod.rs        # Service implementations placeholder
 ```
+
+## Services
+
+### ConceptService
+
+Operations for retrieving and navigating SNOMED CT concepts:
+
+- **GetConcept** - Retrieve a concept by ID with FSN and descriptions
+- **GetParents** - Get direct parent concepts (via IS_A relationships)
+- **GetChildren** - Get direct child concepts (reverse IS_A)
+- **IsDescendantOf** - Check if a concept is a descendant of another (subsumption)
+
+### SearchService
+
+Text search operations:
+
+- **Search** - Search concepts by term (case-insensitive substring match)
+
+### EclService
+
+Expression Constraint Language (ECL) query operations:
+
+- **ExecuteEcl** - Execute an ECL expression and return matching concept IDs/details
+- **MatchesEcl** - Check if a specific concept matches an ECL expression
+- **GetDescendants** - Get all descendants of a concept (optimized traversal)
+- **GetAncestors** - Get all ancestors of a concept (optimized traversal)
 
 ## Protocol Buffer Definitions
 
@@ -28,20 +54,18 @@ The service is defined using Protocol Buffers (proto3):
 
 ```protobuf
 syntax = "proto3";
-
 package snomed;
 
-// SNOMED CT Concept
+// Core messages
 message Concept {
   uint64 id = 1;
   uint32 effective_time = 2;
   bool active = 3;
   uint64 module_id = 4;
   uint64 definition_status_id = 5;
-  string fsn = 6;  // Fully Specified Name
+  string fsn = 6;
 }
 
-// SNOMED CT Description
 message Description {
   uint64 id = 1;
   uint64 concept_id = 2;
@@ -51,79 +75,47 @@ message Description {
   bool active = 6;
 }
 
-// SNOMED CT Relationship
-message Relationship {
-  uint64 id = 1;
-  uint64 source_id = 2;
-  uint64 destination_id = 3;
-  uint64 type_id = 4;
-  uint32 relationship_group = 5;
-  bool active = 6;
+// ECL messages
+message ExecuteEclRequest {
+  string ecl = 1;              // ECL expression (e.g., "<< 73211009")
+  int32 limit = 2;             // Max results (0 = unlimited)
+  bool include_details = 3;    // Include concept details vs just IDs
 }
 
-// Request/Response messages
-message GetConceptRequest {
-  uint64 id = 1;
+message ExecuteEclResponse {
+  repeated uint64 concept_ids = 1;  // IDs (if include_details is false)
+  repeated Concept concepts = 2;     // Details (if include_details is true)
+  uint64 total_count = 3;
+  uint64 execution_time_ms = 4;
+  bool truncated = 5;
 }
 
-message GetConceptResponse {
-  Concept concept = 1;
-  repeated Description descriptions = 2;
-}
-
-message GetParentsRequest {
-  uint64 id = 1;
-}
-
-message GetParentsResponse {
-  repeated Concept parents = 1;
-}
-
-message GetChildrenRequest {
-  uint64 id = 1;
-}
-
-message GetChildrenResponse {
-  repeated Concept children = 1;
-}
-
-message SearchRequest {
-  string query = 1;
-  int32 limit = 2;
-  bool active_only = 3;
-}
-
-message SearchResponse {
-  repeated Concept concepts = 1;
-}
-
-message IsDescendantOfRequest {
+message MatchesEclRequest {
   uint64 concept_id = 1;
-  uint64 ancestor_id = 2;
+  string ecl = 2;
 }
 
-message IsDescendantOfResponse {
-  bool is_descendant = 1;
+message MatchesEclResponse {
+  bool matches = 1;
 }
 
-// Service definitions
+// Services
 service ConceptService {
-  // Get a concept by ID with descriptions
   rpc GetConcept(GetConceptRequest) returns (GetConceptResponse);
-
-  // Get parent concepts (via IS_A relationships)
   rpc GetParents(GetParentsRequest) returns (GetParentsResponse);
-
-  // Get child concepts (reverse IS_A)
   rpc GetChildren(GetChildrenRequest) returns (GetChildrenResponse);
-
-  // Check if concept is descendant of another (subsumption)
   rpc IsDescendantOf(IsDescendantOfRequest) returns (IsDescendantOfResponse);
 }
 
 service SearchService {
-  // Search concepts by term (case-insensitive substring match)
   rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+service EclService {
+  rpc ExecuteEcl(ExecuteEclRequest) returns (ExecuteEclResponse);
+  rpc MatchesEcl(MatchesEclRequest) returns (MatchesEclResponse);
+  rpc GetDescendants(GetDescendantsRequest) returns (GetDescendantsResponse);
+  rpc GetAncestors(GetAncestorsRequest) returns (GetAncestorsResponse);
 }
 ```
 
@@ -132,7 +124,7 @@ service SearchService {
 ```toml
 [dependencies]
 snomed-types = { workspace = true }
-snomed-loader = { workspace = true }
+snomed-loader = { workspace = true }  # Includes ECL support
 tonic = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
@@ -147,24 +139,23 @@ tonic-build = { workspace = true }
 
 ### SnomedServer
 
+The `SnomedServer` struct holds the SNOMED CT data store and implements all three gRPC services:
+
 ```rust
 use snomed_loader::SnomedStore;
 use std::sync::Arc;
 
 /// Main server holding the SNOMED CT data store.
+#[derive(Clone)]
 pub struct SnomedServer {
     store: Arc<SnomedStore>,
 }
 
 impl SnomedServer {
-    /// Creates a new server with the given store.
     pub fn new(store: SnomedStore) -> Self {
-        Self {
-            store: Arc::new(store),
-        }
+        Self { store: Arc::new(store) }
     }
 
-    /// Returns a reference to the underlying store.
     pub fn store(&self) -> &SnomedStore {
         &self.store
     }
@@ -175,14 +166,16 @@ impl SnomedServer {
 
 ```rust
 use snomed_loader::{discover_rf2_files, SnomedStore};
+use snomed_service::proto::{
+    concept_service_server::ConceptServiceServer,
+    search_service_server::SearchServiceServer,
+    ecl_service_server::EclServiceServer,
+};
 use snomed_service::SnomedServer;
 use tonic::transport::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging
-    tracing_subscriber::fmt::init();
-
     // Load SNOMED CT data
     let files = discover_rf2_files("path/to/snomed/release")?;
     let mut store = SnomedStore::new();
@@ -191,13 +184,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create server
     let server = SnomedServer::new(store);
 
-    // Start gRPC server
+    // Start gRPC server with all services
     let addr = "[::1]:50051".parse()?;
-    tracing::info!("Starting SNOMED CT server on {}", addr);
-
     Server::builder()
         .add_service(ConceptServiceServer::new(server.clone()))
-        .add_service(SearchServiceServer::new(server))
+        .add_service(SearchServiceServer::new(server.clone()))
+        .add_service(EclServiceServer::new(server))
         .serve(addr)
         .await?;
 
@@ -205,37 +197,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Planned Features
+### Environment Variables
 
-### Phase 1: Core Services
-- [x] Protocol buffer definitions
-- [x] Server skeleton
-- [x] ConceptService implementation
+- `SNOMED_DATA_PATH` - Path to SNOMED CT RF2 release directory
+- `SNOMED_PORT` - Server port (default: 50051)
+
+## Implementation Status
+
+### Completed Features
+
+- [x] Protocol buffer definitions for all services
+- [x] Server skeleton with multi-service support
+- [x] **ConceptService**
   - [x] GetConcept - Returns concept with FSN and descriptions
   - [x] GetParents - Returns direct IS_A parents
   - [x] GetChildren - Returns direct IS_A children
   - [x] IsDescendantOf - BFS-based subsumption check
-- [x] SearchService implementation
-  - [x] Basic term search (case-insensitive substring match)
+- [x] **SearchService**
+  - [x] Search - Case-insensitive term search with limit
+- [x] **EclService**
+  - [x] ExecuteEcl - Full ECL query execution
+  - [x] MatchesEcl - Test if concept matches ECL
+  - [x] GetDescendants - Optimized descendant traversal
+  - [x] GetAncestors - Optimized ancestor traversal
 
-### Phase 2: Enhanced Features
-- [x] Hierarchy navigation (ancestors via IsDescendantOf)
-- [ ] Full ancestors/descendants traversal endpoints
-- [ ] ECL (Expression Constraint Language) support
-  - [ ] Integration with snomed-ecl-executor
-  - [ ] ExecuteEcl RPC endpoint
-- [ ] MRCM validation endpoints
-  - [ ] ValidateExpression RPC
-  - [ ] GetAllowedAttributes RPC
+### Planned Features
 
-### Phase 3: Production Ready
 - [ ] Health checks (gRPC health protocol)
 - [ ] Metrics (Prometheus)
-- [ ] Configuration (TOML/YAML)
+- [ ] Configuration file support (TOML/YAML)
 - [ ] Docker support
-- [ ] REST gateway (grpc-gateway or tonic-web)
+- [ ] REST gateway (tonic-web)
 - [ ] Streaming responses for large result sets
 - [ ] Pagination support
+- [ ] MRCM validation endpoints
 
 ## Client Usage
 
@@ -244,28 +239,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 use snomed_service::proto::{
     concept_service_client::ConceptServiceClient,
-    GetConceptRequest,
+    ecl_service_client::EclServiceClient,
+    GetConceptRequest, ExecuteEclRequest,
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = ConceptServiceClient::connect("http://[::1]:50051").await?;
+    // Concept queries
+    let mut concept_client = ConceptServiceClient::connect("http://[::1]:50051").await?;
 
-    let request = tonic::Request::new(GetConceptRequest {
-        id: 73211009, // Diabetes mellitus
-    });
+    let response = concept_client.get_concept(GetConceptRequest {
+        id: 73211009,
+    }).await?;
 
-    let response = client.get_concept(request).await?;
-    let concept = response.into_inner();
-
-    if let Some(c) = concept.concept {
-        println!("Concept ID: {}", c.id);
-        println!("Active: {}", c.active);
+    if let Some(c) = response.into_inner().concept {
+        println!("Concept: {} ({})", c.fsn, c.id);
     }
 
-    for desc in &concept.descriptions {
-        println!("Description: {}", desc.term);
-    }
+    // ECL queries
+    let mut ecl_client = EclServiceClient::connect("http://[::1]:50051").await?;
+
+    let response = ecl_client.execute_ecl(ExecuteEclRequest {
+        ecl: "<< 73211009".to_string(),  // Descendants of Diabetes
+        limit: 100,
+        include_details: true,
+    }).await?;
+
+    let result = response.into_inner();
+    println!("Found {} concepts in {}ms", result.total_count, result.execution_time_ms);
 
     Ok(())
 }
@@ -286,14 +287,51 @@ grpcurl -plaintext -d '{"id": 73211009}' \
 grpcurl -plaintext -d '{"id": 64572001}' \
     localhost:50051 snomed.ConceptService/GetChildren
 
-# Check if concept is descendant of another (subsumption)
+# Check subsumption (is 73211009 a descendant of 64572001?)
 grpcurl -plaintext -d '{"concept_id": 73211009, "ancestor_id": 64572001}' \
     localhost:50051 snomed.ConceptService/IsDescendantOf
 
 # Search for terms
 grpcurl -plaintext -d '{"query": "diabetes", "limit": 10, "active_only": true}' \
     localhost:50051 snomed.SearchService/Search
+
+# Execute ECL query - all descendants of Diabetes mellitus
+grpcurl -plaintext -d '{"ecl": "<< 73211009", "limit": 100}' \
+    localhost:50051 snomed.EclService/ExecuteEcl
+
+# Check if concept matches ECL
+grpcurl -plaintext -d '{"concept_id": 46635009, "ecl": "<< 73211009"}' \
+    localhost:50051 snomed.EclService/MatchesEcl
+
+# Get all descendants with details
+grpcurl -plaintext -d '{"concept_id": 73211009, "limit": 50, "include_self": true}' \
+    localhost:50051 snomed.EclService/GetDescendants
+
+# Get all ancestors
+grpcurl -plaintext -d '{"concept_id": 46635009, "include_self": false}' \
+    localhost:50051 snomed.EclService/GetAncestors
 ```
+
+## ECL Support
+
+The service supports SNOMED CT Expression Constraint Language (ECL) via the `snomed-ecl-executor` crate. Supported operators:
+
+- `*` - Wildcard (all concepts)
+- `< id` - Descendants of
+- `<< id` - Descendant or self
+- `> id` - Ancestors of
+- `>> id` - Ancestor or self
+- `! id` - All except
+- `expr AND expr` - Conjunction
+- `expr OR expr` - Disjunction
+- `expr MINUS expr` - Exclusion
+- `{ attr = value }` - Attribute refinement
+- `( expr )` - Grouping
+
+Example ECL expressions:
+- `<< 73211009` - Diabetes mellitus and all subtypes
+- `< 404684003 AND < 123037004` - Clinical findings that are also body structures
+- `<< 73211009 MINUS 46635009` - Diabetes excluding Type 1
 
 ## Architecture Notes
 

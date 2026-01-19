@@ -3,6 +3,7 @@
 use snomed_loader::{discover_rf2_files, SnomedStore};
 use snomed_service::proto::{
     concept_service_server::ConceptServiceServer,
+    ecl_service_server::EclServiceServer,
     search_service_server::SearchServiceServer,
 };
 use snomed_service::SnomedServer;
@@ -58,10 +59,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("[::1]:{}", port).parse()?;
     tracing::info!("Starting SNOMED CT gRPC server on {}", addr);
 
-    // Start gRPC server
+    // Start gRPC server with all services
+    tracing::info!("Services available: ConceptService, SearchService, EclService");
+
     Server::builder()
         .add_service(ConceptServiceServer::new(server.clone()))
-        .add_service(SearchServiceServer::new(server))
+        .add_service(SearchServiceServer::new(server.clone()))
+        .add_service(EclServiceServer::new(server))
         .serve(addr)
         .await?;
 

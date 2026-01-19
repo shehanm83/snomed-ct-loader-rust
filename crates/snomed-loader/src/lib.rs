@@ -72,9 +72,11 @@
 
 mod concept;
 mod description;
+mod ecl;
 mod loader;
 pub mod mrcm;
 mod parser;
+mod refset;
 mod relationship;
 mod store;
 mod types;
@@ -93,3 +95,13 @@ pub use relationship::RelationshipFilter;
 
 // Re-export snomed-types for convenience
 pub use snomed_types;
+
+// Re-export ECL types for convenience
+// The EclQueryable trait is implemented for SnomedStore in the ecl module
+pub use snomed_ecl;
+pub use snomed_ecl_executor::{
+    EclExecutor, EclQueryable, ExecutorConfig, QueryResult, QueryPlan, QueryStep,
+    RelationshipInfo, DescriptionInfo, ConcreteRelationshipInfo,
+};
+// Also re-export the module for accessing nested types
+pub use snomed_ecl_executor;

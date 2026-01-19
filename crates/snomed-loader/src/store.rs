@@ -11,7 +11,7 @@ use std::path::Path;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use snomed_types::{Rf2Concept, Rf2Description, Rf2Relationship, SctId};
+use snomed_types::{Rf2Concept, Rf2Description, Rf2Relationship, Rf2SimpleRefsetMember, SctId};
 
 use crate::description::DescriptionFilter;
 use crate::mrcm::MrcmStore;
@@ -46,6 +46,9 @@ pub struct SnomedStore {
     relationships_by_source: HashMap<SctId, Vec<Rf2Relationship>>,
     /// Relationships indexed by destination concept ID (for reverse lookup).
     relationships_by_destination: HashMap<SctId, Vec<Rf2Relationship>>,
+    /// Reference set members indexed by refset ID.
+    /// Maps refset_id -> list of referenced_component_ids (usually concept IDs).
+    refsets_by_id: HashMap<SctId, Vec<SctId>>,
     /// MRCM data (optional).
     mrcm: Option<MrcmStore>,
 }
@@ -69,6 +72,7 @@ impl SnomedStore {
             descriptions_by_concept: HashMap::with_capacity(concept_count),
             relationships_by_source: HashMap::with_capacity(concept_count),
             relationships_by_destination: HashMap::with_capacity(concept_count),
+            refsets_by_id: HashMap::new(),
             mrcm: None,
         }
     }
@@ -330,6 +334,43 @@ impl SnomedStore {
         Ok(())
     }
 
+    /// Loads simple reference sets from RF2 files.
+    ///
+    /// Reference sets are loaded from all discovered simple refset files.
+    /// Members are indexed by refset ID for efficient lookup.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use snomed_loader::{SnomedStore, discover_rf2_files, Rf2Config};
+    ///
+    /// let files = discover_rf2_files("/path/to/snomed")?;
+    /// let mut store = SnomedStore::new();
+    /// store.load_all(&files)?;
+    /// store.load_simple_refsets(&files, Rf2Config::default())?;
+    ///
+    /// // Query members of a specific refset
+    /// let members = store.get_refset_members(723264001); // Lateralizable body structure reference set
+    /// ```
+    pub fn load_simple_refsets(&mut self, files: &Rf2Files, config: Rf2Config) -> Rf2Result<usize> {
+        let mut total_count = 0;
+
+        for refset_path in &files.simple_refset_files {
+            let parser =
+                Rf2Parser::<_, Rf2SimpleRefsetMember>::from_path(refset_path, config.clone())?;
+
+            for member in parser.flatten() {
+                self.refsets_by_id
+                    .entry(member.refset_id)
+                    .or_default()
+                    .push(member.referenced_component_id);
+                total_count += 1;
+            }
+        }
+
+        Ok(total_count)
+    }
+
     /// Loads MRCM reference set data from discovered files.
     ///
     /// This loads the MRCM domain, attribute domain, and attribute range
@@ -489,6 +530,42 @@ impl SnomedStore {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Gets members of a reference set by refset ID.
+    ///
+    /// Returns a list of referenced component IDs (usually concept IDs) that
+    /// are members of the specified reference set.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Get members of the "Lateralizable body structure" reference set
+    /// let members = store.get_refset_members(723264001);
+    /// for concept_id in members {
+    ///     println!("Member: {}", concept_id);
+    /// }
+    /// ```
+    pub fn get_refset_members(&self, refset_id: SctId) -> Vec<SctId> {
+        self.refsets_by_id
+            .get(&refset_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Returns true if a reference set exists in the store.
+    pub fn has_refset(&self, refset_id: SctId) -> bool {
+        self.refsets_by_id.contains_key(&refset_id)
+    }
+
+    /// Returns the number of reference sets loaded.
+    pub fn refset_count(&self) -> usize {
+        self.refsets_by_id.len()
+    }
+
+    /// Returns total number of refset members across all reference sets.
+    pub fn refset_member_count(&self) -> usize {
+        self.refsets_by_id.values().map(|v| v.len()).sum()
     }
 
     // Statistics

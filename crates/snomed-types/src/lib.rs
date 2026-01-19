@@ -49,6 +49,7 @@ mod concept;
 mod description;
 mod enums;
 pub mod mrcm;
+pub mod refset;
 mod relationship;
 mod sctid;
 pub mod well_known;
@@ -62,6 +63,7 @@ pub use enums::{
 pub use mrcm::{
     Cardinality, CardinalityParseError, MrcmAttributeDomain, MrcmAttributeRange, MrcmDomain,
 };
+pub use refset::{Rf2LanguageRefsetMember, Rf2SimpleRefsetMember};
 pub use relationship::Rf2Relationship;
 pub use sctid::SctId;
 

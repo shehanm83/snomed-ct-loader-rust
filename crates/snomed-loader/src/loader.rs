@@ -51,11 +51,27 @@ pub fn discover_rf2_files<P: AsRef<Path>>(path: P) -> Rf2Result<Rf2Files> {
         }
     }
 
-    // Try to find MRCM files in Refset/Metadata directory
+    // Try to find refset files in Refset directory
     if let Some(snapshot_dir) = terminology_dir.parent() {
-        let metadata_dir = snapshot_dir.join("Refset").join("Metadata");
-        if metadata_dir.exists() {
-            discover_mrcm_files(&metadata_dir, &mut files)?;
+        let refset_dir = snapshot_dir.join("Refset");
+        if refset_dir.exists() {
+            // MRCM files in Refset/Metadata
+            let metadata_dir = refset_dir.join("Metadata");
+            if metadata_dir.exists() {
+                discover_mrcm_files(&metadata_dir, &mut files)?;
+            }
+
+            // Simple refsets in Refset/Content
+            let content_dir = refset_dir.join("Content");
+            if content_dir.exists() {
+                discover_simple_refsets(&content_dir, &mut files)?;
+            }
+
+            // Language refsets in Refset/Language
+            let language_dir = refset_dir.join("Language");
+            if language_dir.exists() {
+                discover_language_refsets(&language_dir, &mut files)?;
+            }
         }
     }
 
@@ -68,6 +84,46 @@ pub fn discover_rf2_files<P: AsRef<Path>>(path: P) -> Rf2Result<Rf2Files> {
     }
 
     Ok(files)
+}
+
+/// Discovers simple reference set files in a Content directory.
+fn discover_simple_refsets(content_dir: &Path, files: &mut Rf2Files) -> Rf2Result<()> {
+    discover_refset_files_recursive(content_dir, &mut files.simple_refset_files, "SimpleRefset")
+}
+
+/// Discovers language reference set files in a Language directory.
+fn discover_language_refsets(language_dir: &Path, files: &mut Rf2Files) -> Rf2Result<()> {
+    discover_refset_files_recursive(language_dir, &mut files.language_refset_files, "LanguageRefset")
+}
+
+/// Recursively discovers refset files matching a pattern.
+fn discover_refset_files_recursive(
+    dir: &Path,
+    file_list: &mut Vec<PathBuf>,
+    pattern: &str,
+) -> Rf2Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recurse into subdirectories
+            discover_refset_files_recursive(&path, file_list, pattern)?;
+        } else if path.is_file() {
+            let filename = path.file_name().map(|n| n.to_string_lossy().to_string());
+            if let Some(name) = filename {
+                if name.ends_with(".txt") && name.contains(pattern) && name.contains("Snapshot") {
+                    file_list.push(path);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Discovers MRCM reference set files in a Metadata directory.
