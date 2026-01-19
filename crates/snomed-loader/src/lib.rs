@@ -71,10 +71,12 @@
 #![warn(missing_docs)]
 
 mod concept;
+mod concrete_relationship;
 mod description;
 mod ecl;
 mod loader;
 pub mod mrcm;
+mod owl_expression;
 mod parser;
 mod refset;
 mod relationship;
@@ -90,6 +92,7 @@ pub use types::{
 };
 
 // Re-export filter traits
+pub use concrete_relationship::{ConcreteRelationshipConfig, ConcreteRelationshipFilter};
 pub use description::DescriptionFilter;
 pub use relationship::RelationshipFilter;
 

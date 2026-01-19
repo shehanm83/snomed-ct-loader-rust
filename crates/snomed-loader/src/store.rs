@@ -27,7 +27,10 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use snomed_ecl_optimizer::TransitiveClosure;
-use snomed_types::{Rf2Concept, Rf2Description, Rf2Relationship, Rf2SimpleRefsetMember, SctId};
+use snomed_types::{
+    Rf2AssociationRefsetMember, Rf2Concept, Rf2ConcreteRelationship, Rf2Description,
+    Rf2LanguageRefsetMember, Rf2OwlExpression, Rf2Relationship, Rf2SimpleRefsetMember, SctId,
+};
 
 use crate::description::DescriptionFilter;
 use crate::mrcm::MrcmStore;
@@ -73,6 +76,16 @@ pub struct SnomedStore {
     /// Reference set members indexed by refset ID.
     /// Maps refset_id -> list of referenced_component_ids (usually concept IDs).
     refsets_by_id: HashMap<SctId, Vec<SctId>>,
+    /// Reverse index: component_id -> list of refset_ids containing it.
+    refsets_containing_component: HashMap<SctId, Vec<SctId>>,
+    /// OWL expressions indexed by referenced concept ID.
+    owl_expressions_by_concept: HashMap<SctId, Vec<Rf2OwlExpression>>,
+    /// Concrete relationships indexed by source concept ID.
+    concrete_relationships_by_source: HashMap<SctId, Vec<Rf2ConcreteRelationship>>,
+    /// Language refset members indexed by description ID.
+    language_members_by_description: HashMap<SctId, Vec<Rf2LanguageRefsetMember>>,
+    /// Association refset members indexed by source component.
+    associations_by_source: HashMap<SctId, Vec<Rf2AssociationRefsetMember>>,
     /// MRCM data (optional).
     mrcm: Option<MrcmStore>,
     /// Precomputed transitive closure for O(1) hierarchy lookups (optional).
@@ -88,6 +101,11 @@ impl Default for SnomedStore {
             relationships_by_source: HashMap::new(),
             relationships_by_destination: HashMap::new(),
             refsets_by_id: HashMap::new(),
+            refsets_containing_component: HashMap::new(),
+            owl_expressions_by_concept: HashMap::new(),
+            concrete_relationships_by_source: HashMap::new(),
+            language_members_by_description: HashMap::new(),
+            associations_by_source: HashMap::new(),
             mrcm: None,
             transitive_closure: None,
         }
@@ -102,6 +120,11 @@ impl std::fmt::Debug for SnomedStore {
             .field("relationships_by_source", &self.relationships_by_source.len())
             .field("relationships_by_destination", &self.relationships_by_destination.len())
             .field("refsets_by_id", &self.refsets_by_id.len())
+            .field("refsets_containing_component", &self.refsets_containing_component.len())
+            .field("owl_expressions_by_concept", &self.owl_expressions_by_concept.len())
+            .field("concrete_relationships_by_source", &self.concrete_relationships_by_source.len())
+            .field("language_members_by_description", &self.language_members_by_description.len())
+            .field("associations_by_source", &self.associations_by_source.len())
             .field("mrcm", &self.mrcm.is_some())
             .field("transitive_closure", &self.transitive_closure.is_some())
             .finish()
@@ -128,6 +151,11 @@ impl SnomedStore {
             relationships_by_source: HashMap::with_capacity(concept_count),
             relationships_by_destination: HashMap::with_capacity(concept_count),
             refsets_by_id: HashMap::new(),
+            refsets_containing_component: HashMap::new(),
+            owl_expressions_by_concept: HashMap::new(),
+            concrete_relationships_by_source: HashMap::new(),
+            language_members_by_description: HashMap::new(),
+            associations_by_source: HashMap::new(),
             mrcm: None,
             transitive_closure: None,
         }
@@ -416,10 +444,18 @@ impl SnomedStore {
                 Rf2Parser::<_, Rf2SimpleRefsetMember>::from_path(refset_path, config.clone())?;
 
             for member in parser.flatten() {
+                // Forward index: refset_id -> members
                 self.refsets_by_id
                     .entry(member.refset_id)
                     .or_default()
                     .push(member.referenced_component_id);
+
+                // Reverse index: component_id -> refsets containing it
+                self.refsets_containing_component
+                    .entry(member.referenced_component_id)
+                    .or_default()
+                    .push(member.refset_id);
+
                 total_count += 1;
             }
         }
@@ -470,6 +506,173 @@ impl SnomedStore {
     /// Returns true if MRCM data has been loaded.
     pub fn has_mrcm(&self) -> bool {
         self.mrcm.is_some()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NEW DATA TYPE LOADING METHODS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Loads OWL expression refset files.
+    ///
+    /// OWL expressions contain OWL 2 EL axioms that define concept semantics.
+    /// Members are indexed by the referenced concept ID for efficient lookup.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let files = discover_rf2_files("/path/to/snomed")?;
+    /// let mut store = SnomedStore::new();
+    /// store.load_owl_expressions(&files, Rf2Config::default())?;
+    ///
+    /// // Get OWL axioms for a concept
+    /// if let Some(axioms) = store.get_owl_expressions(404684003) {
+    ///     for axiom in axioms {
+    ///         println!("OWL: {}", axiom.owl_expression);
+    ///     }
+    /// }
+    /// ```
+    pub fn load_owl_expressions(&mut self, files: &Rf2Files, config: Rf2Config) -> Rf2Result<usize> {
+        let mut total_count = 0;
+
+        for owl_path in &files.owl_expression_files {
+            let parser = Rf2Parser::<_, Rf2OwlExpression>::from_path(owl_path, config.clone())?;
+
+            for expr in parser.flatten() {
+                self.owl_expressions_by_concept
+                    .entry(expr.referenced_component_id)
+                    .or_default()
+                    .push(expr);
+                total_count += 1;
+            }
+        }
+
+        Ok(total_count)
+    }
+
+    /// Loads concrete relationship file.
+    ///
+    /// Concrete relationships have literal values (string, integer, decimal)
+    /// instead of reference to another concept. Common in drug dosages, measurements, etc.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let files = discover_rf2_files("/path/to/snomed")?;
+    /// let mut store = SnomedStore::new();
+    /// store.load_concrete_relationships(&files, Rf2Config::default())?;
+    ///
+    /// // Get concrete relationships for a drug concept
+    /// if let Some(rels) = store.get_concrete_relationships(322236009) {
+    ///     for rel in rels {
+    ///         println!("Value: {:?}", rel.value);
+    ///     }
+    /// }
+    /// ```
+    pub fn load_concrete_relationships(
+        &mut self,
+        files: &Rf2Files,
+        config: Rf2Config,
+    ) -> Rf2Result<usize> {
+        let Some(ref concrete_path) = files.concrete_relationship_file else {
+            return Ok(0);
+        };
+
+        let parser = Rf2Parser::<_, Rf2ConcreteRelationship>::from_path(concrete_path, config)?;
+        let mut count = 0;
+
+        for rel in parser.flatten() {
+            self.concrete_relationships_by_source
+                .entry(rel.source_id)
+                .or_default()
+                .push(rel);
+            count += 1;
+        }
+
+        Ok(count)
+    }
+
+    /// Loads language reference set files.
+    ///
+    /// Language refsets indicate which descriptions are preferred/acceptable
+    /// for a specific language/dialect. Members are indexed by description ID.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let files = discover_rf2_files("/path/to/snomed")?;
+    /// let mut store = SnomedStore::new();
+    /// store.load_language_refsets(&files, Rf2Config::default())?;
+    ///
+    /// // Check acceptability of a description
+    /// if let Some(members) = store.get_language_members_for_description(desc_id) {
+    ///     for member in members {
+    ///         if member.is_preferred() {
+    ///             println!("Preferred in refset {}", member.refset_id);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn load_language_refsets(&mut self, files: &Rf2Files, config: Rf2Config) -> Rf2Result<usize> {
+        let mut total_count = 0;
+
+        for lang_path in &files.language_refset_files {
+            let parser =
+                Rf2Parser::<_, Rf2LanguageRefsetMember>::from_path(lang_path, config.clone())?;
+
+            for member in parser.flatten() {
+                self.language_members_by_description
+                    .entry(member.referenced_component_id)
+                    .or_default()
+                    .push(member);
+                total_count += 1;
+            }
+        }
+
+        Ok(total_count)
+    }
+
+    /// Loads association reference set files.
+    ///
+    /// Association refsets link concepts to their replacements, alternatives,
+    /// or related concepts. Common for tracking historical changes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let files = discover_rf2_files("/path/to/snomed")?;
+    /// let mut store = SnomedStore::new();
+    /// store.load_association_refsets(&files, Rf2Config::default())?;
+    ///
+    /// // Find replacements for an inactive concept
+    /// if let Some(assocs) = store.get_associations_for_concept(inactive_concept_id) {
+    ///     for assoc in assocs {
+    ///         if assoc.is_replaced_by_association() {
+    ///             println!("Replaced by: {}", assoc.target_component_id);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn load_association_refsets(
+        &mut self,
+        files: &Rf2Files,
+        config: Rf2Config,
+    ) -> Rf2Result<usize> {
+        let mut total_count = 0;
+
+        for assoc_path in &files.association_refset_files {
+            let parser =
+                Rf2Parser::<_, Rf2AssociationRefsetMember>::from_path(assoc_path, config.clone())?;
+
+            for member in parser.flatten() {
+                self.associations_by_source
+                    .entry(member.referenced_component_id)
+                    .or_default()
+                    .push(member);
+                total_count += 1;
+            }
+        }
+
+        Ok(total_count)
     }
 
     /// Bulk inserts concepts.
@@ -789,6 +992,205 @@ impl SnomedStore {
     /// Returns total number of refset members across all reference sets.
     pub fn refset_member_count(&self) -> usize {
         self.refsets_by_id.values().map(|v| v.len()).sum()
+    }
+
+    /// Gets all refset IDs that contain a specific component (reverse lookup).
+    ///
+    /// This is the inverse of `get_refset_members`: instead of asking "what concepts
+    /// are in this refset?", you ask "what refsets contain this concept?".
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Find all reference sets containing a specific concept
+    /// let refsets = store.get_refsets_for_concept(80146002); // Appendectomy
+    /// for refset_id in refsets {
+    ///     println!("Member of refset: {}", refset_id);
+    /// }
+    /// ```
+    pub fn get_refsets_for_concept(&self, concept_id: SctId) -> Vec<SctId> {
+        self.refsets_containing_component
+            .get(&concept_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NEW DATA TYPE QUERIES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Gets OWL expressions for a concept.
+    ///
+    /// Returns OWL 2 EL axioms that define the semantics of the concept.
+    /// These include SubClassOf, EquivalentClasses, and other axiom types.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(axioms) = store.get_owl_expressions(404684003) {
+    ///     for axiom in axioms {
+    ///         if axiom.is_subclass_axiom() {
+    ///             println!("SubClassOf: {}", axiom.owl_expression);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn get_owl_expressions(&self, concept_id: SctId) -> Option<&Vec<Rf2OwlExpression>> {
+        self.owl_expressions_by_concept.get(&concept_id)
+    }
+
+    /// Returns the total number of OWL expressions loaded.
+    pub fn owl_expression_count(&self) -> usize {
+        self.owl_expressions_by_concept.values().map(|v| v.len()).sum()
+    }
+
+    /// Gets concrete relationships for a source concept.
+    ///
+    /// Concrete relationships have literal values (string, integer, decimal)
+    /// instead of referencing another concept.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(rels) = store.get_concrete_relationships(322236009) {
+    ///     for rel in rels {
+    ///         if let Some(value) = rel.value.as_integer() {
+    ///             println!("Has numeric value: {}", value);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn get_concrete_relationships(
+        &self,
+        source_id: SctId,
+    ) -> Option<&Vec<Rf2ConcreteRelationship>> {
+        self.concrete_relationships_by_source.get(&source_id)
+    }
+
+    /// Returns the total number of concrete relationships loaded.
+    pub fn concrete_relationship_count(&self) -> usize {
+        self.concrete_relationships_by_source
+            .values()
+            .map(|v| v.len())
+            .sum()
+    }
+
+    /// Gets language refset members for a description.
+    ///
+    /// Returns information about which language refsets include this description
+    /// and whether it's preferred or acceptable in each.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(members) = store.get_language_members_for_description(desc_id) {
+    ///     for member in members {
+    ///         if member.is_preferred() {
+    ///             println!("Preferred in language refset {}", member.refset_id);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn get_language_members_for_description(
+        &self,
+        description_id: SctId,
+    ) -> Option<&Vec<Rf2LanguageRefsetMember>> {
+        self.language_members_by_description.get(&description_id)
+    }
+
+    /// Returns the total number of language refset members loaded.
+    pub fn language_member_count(&self) -> usize {
+        self.language_members_by_description
+            .values()
+            .map(|v| v.len())
+            .sum()
+    }
+
+    /// Gets the preferred term for a concept in a specific language refset.
+    ///
+    /// This finds the description that is marked as "preferred" in the given
+    /// language reference set (e.g., US English, GB English).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // US English language refset
+    /// const US_ENGLISH: SctId = 900000000000509007;
+    ///
+    /// if let Some(term) = store.get_preferred_term_for_language(73211009, US_ENGLISH) {
+    ///     println!("Preferred term: {}", term);
+    /// }
+    /// ```
+    pub fn get_preferred_term_for_language(
+        &self,
+        concept_id: SctId,
+        language_refset_id: SctId,
+    ) -> Option<&str> {
+        // Get all descriptions for this concept
+        let descriptions = self.descriptions_by_concept.get(&concept_id)?;
+
+        // Find a description that is preferred in the given language refset
+        for desc in descriptions {
+            if let Some(lang_members) = self.language_members_by_description.get(&desc.id) {
+                for member in lang_members {
+                    if member.refset_id == language_refset_id && member.is_preferred() {
+                        return Some(&desc.term);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Gets association refset members for a component.
+    ///
+    /// Returns associations that link this component to replacements,
+    /// alternatives, or related components.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(assocs) = store.get_associations_for_concept(inactive_concept_id) {
+    ///     for assoc in assocs {
+    ///         if assoc.is_replaced_by_association() {
+    ///             println!("Replaced by: {}", assoc.target_component_id);
+    ///         } else if assoc.is_same_as_association() {
+    ///             println!("Same as: {}", assoc.target_component_id);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn get_associations_for_concept(
+        &self,
+        concept_id: SctId,
+    ) -> Option<&Vec<Rf2AssociationRefsetMember>> {
+        self.associations_by_source.get(&concept_id)
+    }
+
+    /// Returns the total number of association refset members loaded.
+    pub fn association_count(&self) -> usize {
+        self.associations_by_source.values().map(|v| v.len()).sum()
+    }
+
+    /// Gets the replacement concept for an inactive concept.
+    ///
+    /// This is a convenience method that looks for a REPLACED_BY association
+    /// and returns the target concept ID if found.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if let Some(replacement) = store.get_replacement_concept(inactive_concept_id) {
+    ///     println!("Use {} instead", replacement);
+    /// }
+    /// ```
+    pub fn get_replacement_concept(&self, concept_id: SctId) -> Option<SctId> {
+        self.associations_by_source
+            .get(&concept_id)?
+            .iter()
+            .find(|a| a.is_replaced_by_association())
+            .map(|a| a.target_component_id)
     }
 
     // Statistics

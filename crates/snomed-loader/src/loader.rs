@@ -48,6 +48,10 @@ pub fn discover_rf2_files<P: AsRef<Path>>(path: P) -> Rf2Result<Rf2Files> {
             files.stated_relationship_file = Some(entry.path());
         } else if filename_str.starts_with("sct2_TextDefinition_Snapshot") {
             files.text_definition_file = Some(entry.path());
+        } else if filename_str.starts_with("sct2_RelationshipConcreteValues_Snapshot") {
+            files.concrete_relationship_file = Some(entry.path());
+        } else if filename_str.contains("sRefset_OWL") && filename_str.contains("Snapshot") {
+            files.owl_expression_files.push(entry.path());
         }
     }
 
@@ -72,6 +76,11 @@ pub fn discover_rf2_files<P: AsRef<Path>>(path: P) -> Rf2Result<Rf2Files> {
             if language_dir.exists() {
                 discover_language_refsets(&language_dir, &mut files)?;
             }
+
+            // Association refsets in Refset/Content
+            if content_dir.exists() {
+                discover_association_refsets(&content_dir, &mut files)?;
+            }
         }
     }
 
@@ -94,6 +103,11 @@ fn discover_simple_refsets(content_dir: &Path, files: &mut Rf2Files) -> Rf2Resul
 /// Discovers language reference set files in a Language directory.
 fn discover_language_refsets(language_dir: &Path, files: &mut Rf2Files) -> Rf2Result<()> {
     discover_refset_files_recursive(language_dir, &mut files.language_refset_files, "LanguageRefset")
+}
+
+/// Discovers association reference set files in a Content directory.
+fn discover_association_refsets(content_dir: &Path, files: &mut Rf2Files) -> Rf2Result<()> {
+    discover_refset_files_recursive(content_dir, &mut files.association_refset_files, "AssociationRefset")
 }
 
 /// Recursively discovers refset files matching a pattern.

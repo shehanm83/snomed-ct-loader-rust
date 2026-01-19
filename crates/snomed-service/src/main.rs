@@ -4,6 +4,7 @@ use snomed_loader::{discover_rf2_files, SnomedStore};
 use snomed_service::proto::{
     concept_service_server::ConceptServiceServer,
     ecl_service_server::EclServiceServer,
+    refset_service_server::RefsetServiceServer,
     search_service_server::SearchServiceServer,
 };
 use snomed_service::SnomedServer;
@@ -62,6 +63,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => tracing::warn!("Could not load refsets: {}", e),
     }
 
+    // Load OWL expressions if available
+    tracing::info!("Loading OWL expressions...");
+    match store.load_owl_expressions(&files, snomed_loader::Rf2Config::default()) {
+        Ok(count) => tracing::info!("Loaded {} OWL expressions", count),
+        Err(e) => tracing::warn!("Could not load OWL expressions: {}", e),
+    }
+
+    // Load concrete relationships if available
+    tracing::info!("Loading concrete relationships...");
+    match store.load_concrete_relationships(&files, snomed_loader::Rf2Config::default()) {
+        Ok(count) => tracing::info!("Loaded {} concrete relationships", count),
+        Err(e) => tracing::warn!("Could not load concrete relationships: {}", e),
+    }
+
+    // Load language refsets if available
+    tracing::info!("Loading language refsets...");
+    match store.load_language_refsets(&files, snomed_loader::Rf2Config::default()) {
+        Ok(count) => tracing::info!("Loaded {} language refset members", count),
+        Err(e) => tracing::warn!("Could not load language refsets: {}", e),
+    }
+
+    // Load association refsets if available
+    tracing::info!("Loading association refsets...");
+    match store.load_association_refsets(&files, snomed_loader::Rf2Config::default()) {
+        Ok(count) => tracing::info!("Loaded {} association refset members", count),
+        Err(e) => tracing::warn!("Could not load association refsets: {}", e),
+    }
+
     // Build transitive closure for O(1) hierarchy queries
     tracing::info!("Building transitive closure for optimized hierarchy queries...");
     store.build_transitive_closure();
@@ -80,12 +109,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Starting SNOMED CT gRPC server on {}", addr);
 
     // Start gRPC server with all services
-    tracing::info!("Services available: ConceptService, SearchService, EclService");
+    tracing::info!("Services available: ConceptService, SearchService, EclService, RefsetService");
 
     Server::builder()
         .add_service(ConceptServiceServer::new(server.clone()))
         .add_service(SearchServiceServer::new(server.clone()))
-        .add_service(EclServiceServer::new(server))
+        .add_service(EclServiceServer::new(server.clone()))
+        .add_service(RefsetServiceServer::new(server))
         .serve(addr)
         .await?;
 

@@ -1,9 +1,9 @@
 //! RF2 Reference Set parser implementations.
 //!
-//! This module provides parsers for simple and language reference sets.
+//! This module provides parsers for simple, language, and association reference sets.
 
 use csv::StringRecord;
-use snomed_types::{Rf2LanguageRefsetMember, Rf2SimpleRefsetMember};
+use snomed_types::{Rf2AssociationRefsetMember, Rf2LanguageRefsetMember, Rf2SimpleRefsetMember};
 
 use crate::parser::{parse, Rf2Record};
 use crate::types::{Rf2Config, Rf2Result};
@@ -27,6 +27,17 @@ const LANGUAGE_REFSET_COLUMNS: &[&str] = &[
     "refsetId",
     "referencedComponentId",
     "acceptabilityId",
+];
+
+/// Expected columns for association reference set files.
+const ASSOCIATION_REFSET_COLUMNS: &[&str] = &[
+    "id",
+    "effectiveTime",
+    "active",
+    "moduleId",
+    "refsetId",
+    "referencedComponentId",
+    "targetComponentId",
 ];
 
 impl Rf2Record for Rf2SimpleRefsetMember {
@@ -63,6 +74,29 @@ impl Rf2Record for Rf2LanguageRefsetMember {
             refset_id: parse::sctid(record.get(4).unwrap_or(""))?,
             referenced_component_id: parse::sctid(record.get(5).unwrap_or(""))?,
             acceptability_id: parse::sctid(record.get(6).unwrap_or(""))?,
+        })
+    }
+
+    fn passes_filter(&self, config: &Rf2Config) -> bool {
+        if config.active_only && !self.active {
+            return false;
+        }
+        true
+    }
+}
+
+impl Rf2Record for Rf2AssociationRefsetMember {
+    const EXPECTED_COLUMNS: &'static [&'static str] = ASSOCIATION_REFSET_COLUMNS;
+
+    fn from_record(record: &StringRecord) -> Rf2Result<Self> {
+        Ok(Self {
+            id: parse::sctid(record.get(0).unwrap_or(""))?,
+            effective_time: parse::effective_time(record.get(1).unwrap_or(""))?,
+            active: parse::boolean(record.get(2).unwrap_or(""))?,
+            module_id: parse::sctid(record.get(3).unwrap_or(""))?,
+            refset_id: parse::sctid(record.get(4).unwrap_or(""))?,
+            referenced_component_id: parse::sctid(record.get(5).unwrap_or(""))?,
+            target_component_id: parse::sctid(record.get(6).unwrap_or(""))?,
         })
     }
 
@@ -149,5 +183,45 @@ mod tests {
         assert!(!inactive_member.passes_filter(&active_config));
         assert!(active_member.passes_filter(&all_config));
         assert!(inactive_member.passes_filter(&all_config));
+    }
+
+    #[test]
+    fn test_parse_association_refset_member() {
+        let record = StringRecord::from(vec![
+            "12345678901",           // id
+            "20200101",              // effectiveTime
+            "1",                     // active
+            "900000000000207008",    // moduleId
+            "900000000000527005",    // refsetId (SAME AS)
+            "12345678",              // referencedComponentId
+            "87654321",              // targetComponentId
+        ]);
+
+        let member = Rf2AssociationRefsetMember::from_record(&record).unwrap();
+        assert_eq!(member.id, 12345678901);
+        assert!(member.active);
+        assert_eq!(member.refset_id, Rf2AssociationRefsetMember::SAME_AS_REFSET);
+        assert_eq!(member.referenced_component_id, 12345678);
+        assert_eq!(member.target_component_id, 87654321);
+        assert!(member.is_same_as_association());
+        assert!(member.is_historical_association());
+    }
+
+    #[test]
+    fn test_parse_replaced_by_association() {
+        let record = StringRecord::from(vec![
+            "12345678901",
+            "20200101",
+            "1",
+            "900000000000207008",
+            "900000000000526001",    // REPLACED BY
+            "12345678",
+            "87654321",
+        ]);
+
+        let member = Rf2AssociationRefsetMember::from_record(&record).unwrap();
+        assert!(member.is_replaced_by_association());
+        assert!(member.is_historical_association());
+        assert!(!member.is_same_as_association());
     }
 }

@@ -91,6 +91,10 @@ pub enum Rf2Error {
         /// Found column name.
         found: String,
     },
+
+    /// Generic parse error.
+    #[error("Parse error: {0}")]
+    Parse(String),
 }
 
 /// Result type for RF2 operations.
@@ -238,6 +242,12 @@ pub struct Rf2Files {
     pub simple_refset_files: Vec<PathBuf>,
     /// Paths to language reference set files.
     pub language_refset_files: Vec<PathBuf>,
+    /// Paths to association reference set files.
+    pub association_refset_files: Vec<PathBuf>,
+    /// Paths to OWL expression reference set files.
+    pub owl_expression_files: Vec<PathBuf>,
+    /// Path to concrete relationship file.
+    pub concrete_relationship_file: Option<PathBuf>,
     /// Release date extracted from filename (YYYYMMDD).
     pub release_date: Option<String>,
 }

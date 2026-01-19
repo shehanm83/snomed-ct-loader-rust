@@ -46,9 +46,11 @@
 #![warn(missing_docs)]
 
 mod concept;
+mod concrete_relationship;
 mod description;
 mod enums;
 pub mod mrcm;
+mod owl_expression;
 pub mod refset;
 mod relationship;
 mod sctid;
@@ -56,6 +58,7 @@ pub mod well_known;
 
 // Re-export all public types at crate root
 pub use concept::Rf2Concept;
+pub use concrete_relationship::{ConcreteValue, Rf2ConcreteRelationship};
 pub use description::Rf2Description;
 pub use enums::{
     CaseSignificance, CharacteristicType, DefinitionStatus, DescriptionType, ModifierType,
@@ -63,7 +66,8 @@ pub use enums::{
 pub use mrcm::{
     Cardinality, CardinalityParseError, MrcmAttributeDomain, MrcmAttributeRange, MrcmDomain,
 };
-pub use refset::{Rf2LanguageRefsetMember, Rf2SimpleRefsetMember};
+pub use owl_expression::Rf2OwlExpression;
+pub use refset::{Rf2AssociationRefsetMember, Rf2LanguageRefsetMember, Rf2SimpleRefsetMember};
 pub use relationship::Rf2Relationship;
 pub use sctid::SctId;
 

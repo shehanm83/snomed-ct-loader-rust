@@ -30,6 +30,52 @@ message Relationship {
   uint64 type_id = 4;
   uint32 relationship_group = 5;
   bool active = 6;
+  uint64 characteristic_type_id = 7;
+}
+
+// SNOMED CT Concrete Relationship (with literal values)
+message ConcreteRelationship {
+  uint64 id = 1;
+  uint64 source_id = 2;
+  string value = 3;            // The literal value as string
+  ConcreteValueType value_type = 4;
+  uint64 type_id = 5;
+  uint32 relationship_group = 6;
+  bool active = 7;
+}
+
+// Type of concrete value
+enum ConcreteValueType {
+  CONCRETE_VALUE_TYPE_UNSPECIFIED = 0;
+  CONCRETE_VALUE_TYPE_STRING = 1;
+  CONCRETE_VALUE_TYPE_INTEGER = 2;
+  CONCRETE_VALUE_TYPE_DECIMAL = 3;
+}
+
+// Reference set member
+message RefsetMember {
+  uint64 id = 1;
+  uint64 refset_id = 2;
+  uint64 referenced_component_id = 3;
+  bool active = 4;
+}
+
+// Association refset member (links source to target)
+message AssociationMember {
+  uint64 id = 1;
+  uint64 refset_id = 2;
+  uint64 source_component_id = 3;
+  uint64 target_component_id = 4;
+  bool active = 5;
+}
+
+// OWL expression axiom
+message OwlExpression {
+  uint64 id = 1;
+  uint64 refset_id = 2;
+  uint64 referenced_concept_id = 3;
+  string owl_expression = 4;
+  bool active = 5;
 }
 
 // Request/Response messages
@@ -77,6 +123,113 @@ message IsDescendantOfResponse {
   bool is_descendant = 1;
 }
 
+// ============================================================================
+// Extended Concept API Messages
+// ============================================================================
+
+// Get relationships for a concept
+message GetRelationshipsRequest {
+  uint64 concept_id = 1;
+  // Optional: filter to specific type IDs (empty = all types)
+  repeated uint64 type_filter = 2;
+  // Include incoming relationships (where concept is destination)
+  bool include_incoming = 3;
+}
+
+message GetRelationshipsResponse {
+  repeated Relationship outgoing = 1;
+  repeated Relationship incoming = 2;
+}
+
+// Batch get multiple concepts
+message GetConceptsBatchRequest {
+  repeated uint64 ids = 1;
+  // Whether to include descriptions
+  bool include_descriptions = 2;
+}
+
+message GetConceptsBatchResponse {
+  repeated Concept concepts = 1;
+  // IDs that were not found
+  repeated uint64 not_found = 2;
+}
+
+// Get preferred term for a concept in a specific language
+message GetPreferredTermRequest {
+  uint64 concept_id = 1;
+  // Language reference set ID (e.g., 900000000000509007 for US English)
+  uint64 language_refset_id = 2;
+}
+
+message GetPreferredTermResponse {
+  string term = 1;
+  bool found = 2;
+}
+
+// Get concrete relationships for a concept
+message GetConcreteRelationshipsRequest {
+  uint64 concept_id = 1;
+  // Optional: filter to specific type IDs
+  repeated uint64 type_filter = 2;
+}
+
+message GetConcreteRelationshipsResponse {
+  repeated ConcreteRelationship relationships = 1;
+}
+
+// Get OWL expressions for a concept
+message GetOwlExpressionsRequest {
+  uint64 concept_id = 1;
+}
+
+message GetOwlExpressionsResponse {
+  repeated OwlExpression expressions = 1;
+}
+
+// ============================================================================
+// Reference Set API Messages
+// ============================================================================
+
+// Get members of a reference set
+message GetRefsetMembersRequest {
+  uint64 refset_id = 1;
+  int32 limit = 2;   // Max results (0 = unlimited)
+  int32 offset = 3;  // Pagination offset
+}
+
+message GetRefsetMembersResponse {
+  repeated uint64 member_ids = 1;
+  uint64 total_count = 2;
+}
+
+// Reverse lookup: get all refsets containing a component
+message GetRefsetsForConceptRequest {
+  uint64 concept_id = 1;
+}
+
+message GetRefsetsForConceptResponse {
+  repeated uint64 refset_ids = 1;
+}
+
+// Get associations for a concept (historical relationships)
+message GetAssociationsRequest {
+  uint64 concept_id = 1;
+}
+
+message GetAssociationsResponse {
+  repeated AssociationMember associations = 1;
+}
+
+// Get replacement concept for an inactive concept
+message GetReplacementConceptRequest {
+  uint64 inactive_concept_id = 1;
+}
+
+message GetReplacementConceptResponse {
+  uint64 replacement_id = 1;
+  bool found = 2;
+}
+
 // Service definitions
 service ConceptService {
   // Get a concept by ID
@@ -90,11 +243,41 @@ service ConceptService {
 
   // Check if concept is descendant of another
   rpc IsDescendantOf(IsDescendantOfRequest) returns (IsDescendantOfResponse);
+
+  // Get multiple concepts in a single request
+  rpc GetConceptsBatch(GetConceptsBatchRequest) returns (GetConceptsBatchResponse);
+
+  // Get relationships for a concept
+  rpc GetRelationships(GetRelationshipsRequest) returns (GetRelationshipsResponse);
+
+  // Get concrete relationships (with literal values)
+  rpc GetConcreteRelationships(GetConcreteRelationshipsRequest) returns (GetConcreteRelationshipsResponse);
+
+  // Get OWL expressions for a concept
+  rpc GetOwlExpressions(GetOwlExpressionsRequest) returns (GetOwlExpressionsResponse);
+
+  // Get preferred term for a specific language
+  rpc GetPreferredTerm(GetPreferredTermRequest) returns (GetPreferredTermResponse);
+
+  // Get associations (historical relationships)
+  rpc GetAssociations(GetAssociationsRequest) returns (GetAssociationsResponse);
+
+  // Get replacement concept for an inactive concept
+  rpc GetReplacementConcept(GetReplacementConceptRequest) returns (GetReplacementConceptResponse);
 }
 
 service SearchService {
   // Search concepts by term
   rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+// Reference set query service
+service RefsetService {
+  // Get members of a reference set
+  rpc GetRefsetMembers(GetRefsetMembersRequest) returns (GetRefsetMembersResponse);
+
+  // Get all reference sets containing a concept (reverse lookup)
+  rpc GetRefsetsForConcept(GetRefsetsForConceptRequest) returns (GetRefsetsForConceptResponse);
 }
 
 // ============================================================================

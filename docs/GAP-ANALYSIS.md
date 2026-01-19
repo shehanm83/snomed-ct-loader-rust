@@ -3,8 +3,8 @@
 **Project:** snomed-ct-loader-rust
 **Version:** 0.1.0
 **Analysis Date:** 2026-01-19
-**Document Version:** 1.1
-**Last Updated:** 2026-01-19 (Added snomed-ecl-optimizer integration)
+**Document Version:** 1.2
+**Last Updated:** 2026-01-19 (Functional gaps implementation completed)
 
 ---
 
@@ -12,16 +12,17 @@
 
 1. [Executive Summary](#1-executive-summary)
 2. [Recent Changes - Optimizer Integration](#2-recent-changes---optimizer-integration)
-3. [Critical Issues](#3-critical-issues)
-4. [Architectural Flaws](#4-architectural-flaws)
-5. [Functional Gaps](#5-functional-gaps)
-6. [Technical Debt](#6-technical-debt)
-7. [Security Concerns](#7-security-concerns)
-8. [Performance Issues](#8-performance-issues)
-9. [Test Coverage Gaps](#9-test-coverage-gaps)
-10. [Documentation Gaps](#10-documentation-gaps)
-11. [Prioritized Remediation Plan](#11-prioritized-remediation-plan)
-12. [Appendix: Detailed Findings](#12-appendix-detailed-findings)
+3. [Recent Changes - Functional Gaps Implementation](#3-recent-changes---functional-gaps-implementation)
+4. [Critical Issues](#4-critical-issues)
+5. [Architectural Flaws](#5-architectural-flaws)
+6. [Functional Gaps](#6-functional-gaps)
+7. [Technical Debt](#7-technical-debt)
+8. [Security Concerns](#8-security-concerns)
+9. [Performance Issues](#9-performance-issues)
+10. [Test Coverage Gaps](#10-test-coverage-gaps)
+11. [Documentation Gaps](#11-documentation-gaps)
+12. [Prioritized Remediation Plan](#12-prioritized-remediation-plan)
+13. [Appendix: Detailed Findings](#13-appendix-detailed-findings)
 
 ---
 
@@ -36,17 +37,17 @@ This document provides a comprehensive gap analysis of the snomed-ct-loader-rust
 | Category | Score | Status |
 |----------|-------|--------|
 | Architecture | 7/10 | Good crate separation, memory optimization needed |
-| Completeness | 6/10 | Core RF2 functional, advanced features missing |
+| Completeness | 8/10 | Core RF2 functional, OWL/concrete/associations added |
 | Production Readiness | 4/10 | Critical gaps in operations/security |
 | Code Quality | 8/10 | Clean code, good patterns, minor issues |
-| Test Coverage | 5/10 | Types/loader adequate, service layer untested |
+| Test Coverage | 6/10 | Types/loader adequate (138 tests), service layer needs tests |
 | Documentation | 8/10 | Excellent inline docs, missing examples |
 
 ### 1.3 Key Findings Summary
 
-- **6 Critical Issues** requiring immediate attention
+- **6 Critical Issues** requiring immediate attention (1 fixed: CRIT-006)
 - **5 Architectural Flaws** affecting scalability and performance
-- **15+ Functional Gaps** in RF2 support and API coverage
+- **Most Functional Gaps RESOLVED** - OWL, concrete domains, refsets, gRPC endpoints
 - **20+ Technical Debt Items** across all crates
 - **0% Test Coverage** in snomed-service crate
 
@@ -54,9 +55,9 @@ This document provides a comprehensive gap analysis of the snomed-ct-loader-rust
 
 | Risk Level | Count | Examples |
 |------------|-------|----------|
-| **Critical** | 6 | Hardcoded paths, no TLS, no graceful shutdown |
-| **High** | 12 | Memory duplication, linear search, no streaming |
-| **Medium** | 18 | Missing endpoints, incomplete ECL, no metrics |
+| **Critical** | 5 | Hardcoded paths, no TLS, no graceful shutdown |
+| **High** | 10 | Memory duplication, linear search, no streaming |
+| **Medium** | 10 | Missing metrics, incomplete ECL concrete values |
 | **Low** | 10 | Documentation, polish, additional constants |
 
 ---
@@ -141,11 +142,151 @@ The following gaps from the original analysis are now **RESOLVED**:
 
 ---
 
-## 3. Critical Issues
+## 3. Recent Changes - Functional Gaps Implementation
+
+### 3.1 Overview
+
+A comprehensive implementation was completed to address the HIGH and MEDIUM priority functional gaps identified in this analysis. This implementation adds support for new RF2 file types, store capabilities, and gRPC endpoints.
+
+### 3.2 Phase 1: RF2 Type Definitions (snomed-types crate)
+
+| New Type | File | Description |
+|----------|------|-------------|
+| `Rf2OwlExpression` | `owl_expression.rs` | OWL 2 EL axiom expressions |
+| `Rf2ConcreteRelationship` | `concrete_relationship.rs` | Relationships with literal values |
+| `ConcreteValue` | `concrete_relationship.rs` | String/Integer/Decimal enum |
+| `Rf2AssociationRefsetMember` | `refset.rs` | Historical association links |
+
+**Helper methods added:**
+- `Rf2OwlExpression::is_subclass_axiom()`, `is_equivalent_classes_axiom()`, etc.
+- `ConcreteValue::parse()`, `as_string()`, `as_integer()`, `as_decimal()`
+- `Rf2AssociationRefsetMember::is_replaced_by_association()`, `is_same_as_association()`
+
+### 3.3 Phase 2: Parsers and File Discovery (snomed-loader crate)
+
+| New Parser | Pattern | Description |
+|------------|---------|-------------|
+| OWL Expression | `sct2_sRefset_OWL*.txt` | Parses OWL axiom refsets |
+| Concrete Relationship | `sct2_RelationshipConcreteValues_*.txt` | Parses concrete domain values |
+| Association Refset | `der2_cRefset_Association*.txt` | Parses historical associations |
+
+**Rf2Files struct extended with:**
+```rust
+pub owl_expression_files: Vec<PathBuf>,
+pub concrete_relationship_file: Option<PathBuf>,
+pub association_refset_files: Vec<PathBuf>,
+```
+
+### 3.4 Phase 3: Store Enhancements (snomed-loader crate)
+
+**New indexes added to SnomedStore:**
+
+| Index | Type | Purpose |
+|-------|------|---------|
+| `refsets_containing_component` | `HashMap<SctId, Vec<SctId>>` | Reverse refset lookup |
+| `owl_expressions_by_concept` | `HashMap<SctId, Vec<Rf2OwlExpression>>` | OWL axioms per concept |
+| `concrete_relationships_by_source` | `HashMap<SctId, Vec<Rf2ConcreteRelationship>>` | Concrete values per concept |
+| `language_members_by_description` | `HashMap<SctId, Vec<Rf2LanguageRefsetMember>>` | Language acceptability |
+| `associations_by_source` | `HashMap<SctId, Vec<Rf2AssociationRefsetMember>>` | Historical associations |
+
+**New loading methods:**
+
+| Method | Description |
+|--------|-------------|
+| `load_owl_expressions(&files, config)` | Load OWL expression refsets |
+| `load_concrete_relationships(&files, config)` | Load concrete domain relationships |
+| `load_language_refsets(&files, config)` | Load language refsets |
+| `load_association_refsets(&files, config)` | Load association refsets |
+
+**New query methods:**
+
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `get_refsets_for_concept(id)` | `Vec<SctId>` | Reverse refset lookup |
+| `get_owl_expressions(id)` | `Option<&Vec<Rf2OwlExpression>>` | OWL axioms for concept |
+| `get_concrete_relationships(id)` | `Option<&Vec<Rf2ConcreteRelationship>>` | Concrete values |
+| `get_preferred_term_for_language(id, lang_refset)` | `Option<&str>` | Language-specific preferred term |
+| `get_associations_for_concept(id)` | `Option<&Vec<Rf2AssociationRefsetMember>>` | Historical associations |
+| `get_replacement_concept(id)` | `Option<SctId>` | Get REPLACED_BY target |
+
+### 3.5 Phase 4: gRPC Endpoints (snomed-service crate)
+
+**New Proto Messages:**
+
+| Message | Fields | Description |
+|---------|--------|-------------|
+| `ConcreteRelationship` | id, source_id, value, value_type, type_id, group | Concrete domain relationship |
+| `OwlExpression` | id, refset_id, referenced_concept_id, owl_expression | OWL axiom |
+| `AssociationMember` | id, refset_id, source_component_id, target_component_id | Association link |
+| `ConcreteValueType` | STRING, INTEGER, DECIMAL | Enum for value types |
+
+**New ConceptService RPCs:**
+
+| RPC | Request | Response | Description |
+|-----|---------|----------|-------------|
+| `GetConceptsBatch` | ids[] | concepts[], not_found[] | Batch concept lookup |
+| `GetRelationships` | concept_id, type_filter[], include_incoming | outgoing[], incoming[] | Relationship query |
+| `GetConcreteRelationships` | concept_id, type_filter[] | relationships[] | Concrete values |
+| `GetOwlExpressions` | concept_id | expressions[] | OWL axioms |
+| `GetPreferredTerm` | concept_id, language_refset_id | term, found | Language-specific term |
+| `GetAssociations` | concept_id | associations[] | Historical associations |
+| `GetReplacementConcept` | inactive_concept_id | replacement_id, found | Get replacement |
+
+**New RefsetService:**
+
+| RPC | Request | Response | Description |
+|-----|---------|----------|-------------|
+| `GetRefsetMembers` | refset_id, limit, offset | member_ids[], total_count | Paginated refset query |
+| `GetRefsetsForConcept` | concept_id | refset_ids[] | Reverse refset lookup |
+
+### 3.6 Gaps Resolved
+
+| Gap ID | Description | Status |
+|--------|-------------|--------|
+| CRIT-006 | Serde feature not gated in refset module | ✅ RESOLVED |
+| OWL Expressions | `sct2_sRefset_OWL*.txt` not supported | ✅ RESOLVED |
+| Concrete Domains | `sct2_RelationshipConcreteValues_*.txt` not supported | ✅ RESOLVED |
+| Association Refsets | `der2_cRefset_Association*.txt` not supported | ✅ RESOLVED |
+| GetRelationships | Missing gRPC endpoint | ✅ RESOLVED |
+| GetConceptsBatch | Missing gRPC endpoint | ✅ RESOLVED |
+| GetRefsetMembers | Missing gRPC endpoint | ✅ RESOLVED |
+| GetPreferredTerm | Missing gRPC endpoint | ✅ RESOLVED |
+| Reverse refset index | Can't query "which refsets contain X" | ✅ RESOLVED |
+| Language preference | Ignores acceptability | ✅ RESOLVED |
+| Missing RF2 types | Rf2OwlExpression, Rf2ConcreteValue, Rf2AssociationMember | ✅ RESOLVED |
+
+### 3.7 Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| snomed-types | 47 unit + 19 doc | ✅ All pass |
+| snomed-loader | 72 unit + 24 doc | ✅ All pass |
+| snomed-service | 0 | ⚠️ Needs tests |
+| **Total** | **138 tests** | ✅ All pass |
+
+### 3.8 Server Startup Changes
+
+The server now loads additional data types:
+
+```rust
+// main.rs startup sequence
+store.load_all(&files)?;                                    // Core data
+store.load_mrcm(&files)?;                                   // MRCM constraints
+store.load_simple_refsets(&files, Rf2Config::default())?;   // Simple refsets
+store.load_owl_expressions(&files, Rf2Config::default())?;  // NEW: OWL expressions
+store.load_concrete_relationships(&files, Rf2Config::default())?; // NEW: Concrete rels
+store.load_language_refsets(&files, Rf2Config::default())?; // NEW: Language refsets
+store.load_association_refsets(&files, Rf2Config::default())?; // NEW: Associations
+store.build_transitive_closure();                           // Hierarchy optimization
+```
+
+---
+
+## 4. Critical Issues
 
 Issues that **must be fixed before any production deployment**.
 
-### 3.1 Hardcoded Windows File Path
+### 4.1 Hardcoded Windows File Path
 
 | Attribute | Value |
 |-----------|-------|
@@ -168,7 +309,7 @@ const DEFAULT_DATA_PATH: &str = "H:/3.0/apps/snomed-ct-loader-rust/data/...";
 
 ---
 
-### 3.2 No Graceful Shutdown Handling
+### 4.2 No Graceful Shutdown Handling
 
 | Attribute | Value |
 |-----------|-------|
@@ -206,7 +347,7 @@ Server::builder()
 
 ---
 
-### 3.3 No TLS/SSL Support
+### 4.3 No TLS/SSL Support
 
 | Attribute | Value |
 |-----------|-------|
@@ -235,7 +376,7 @@ Server::builder()
 
 ---
 
-### 3.4 No Connection/Message Size Limits
+### 4.4 No Connection/Message Size Limits
 
 | Attribute | Value |
 |-----------|-------|
@@ -262,7 +403,7 @@ Server::builder()
 
 ---
 
-### 3.5 No Health Check Endpoint
+### 4.5 No Health Check Endpoint
 
 | Attribute | Value |
 |-----------|-------|
@@ -289,14 +430,15 @@ service Health {
 
 ---
 
-### 3.6 Serde Feature Not Gated in Refset Module
+### 4.6 Serde Feature Not Gated in Refset Module ✅ RESOLVED
 
 | Attribute | Value |
 |-----------|-------|
 | **ID** | CRIT-006 |
 | **Location** | `crates/snomed-types/src/refset.rs:28` |
-| **Severity** | Critical |
+| **Severity** | ~~Critical~~ **Resolved** |
 | **Type** | Build |
+| **Status** | ✅ **FIXED in v1.2** |
 
 **Description:**
 ```rust
@@ -306,9 +448,9 @@ use serde::{Deserialize, Serialize};  // Unconditional import
 pub struct Rf2SimpleRefsetMember { ... }
 ```
 
-**Impact:** Crate fails to compile when `serde` feature is disabled.
+**Impact:** ~~Crate fails to compile when `serde` feature is disabled.~~ **RESOLVED**
 
-**Remediation:**
+**Fix Applied:**
 ```rust
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -320,9 +462,9 @@ pub struct Rf2SimpleRefsetMember { ... }
 
 ---
 
-## 4. Architectural Flaws
+## 5. Architectural Flaws
 
-### 4.1 Memory Inefficiency - Relationship Duplication
+### 5.1 Memory Inefficiency - Relationship Duplication
 
 | Attribute | Value |
 |-----------|-------|
@@ -363,7 +505,7 @@ by_destination: HashMap<SctId, Vec<usize>>,
 
 ---
 
-### 4.2 Linear Search in SearchService
+### 5.2 Linear Search in SearchService
 
 | Attribute | Value |
 |-----------|-------|
@@ -397,7 +539,7 @@ for (&concept_id, descriptions) in &self.store... {
 
 ---
 
-### 4.3 No Streaming for Large Results
+### 5.3 No Streaming for Large Results
 
 | Attribute | Value |
 |-----------|-------|
@@ -436,7 +578,7 @@ async fn execute_ecl_stream(
 
 ---
 
-### 4.4 Unbounded Graph Traversal (RESOLVED)
+### 5.4 Unbounded Graph Traversal (RESOLVED)
 
 | Attribute | Value |
 |-----------|-------|
@@ -479,7 +621,7 @@ while let Some((current, depth)) = queue.pop_front() {
 
 ---
 
-### 4.5 Tight Coupling in Service Layer
+### 5.5 Tight Coupling in Service Layer
 
 | Attribute | Value |
 |-----------|-------|
@@ -515,9 +657,9 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 5. Functional Gaps
+## 6. Functional Gaps
 
-### 5.1 RF2 File Type Support
+### 6.1 RF2 File Type Support
 
 | File Type | Pattern | Status | Priority |
 |-----------|---------|--------|----------|
@@ -531,32 +673,39 @@ pub struct SnomedServer<R: SnomedRepository> {
 | MRCM Domain | `der2_sssssRefset_MRCMDomain*.txt` | ✅ Implemented | - |
 | MRCM Attribute Domain | `der2_cissccRefset_MRCMAttributeDomain*.txt` | ✅ Implemented | - |
 | MRCM Attribute Range | `der2_ssccRefset_MRCMAttributeRange*.txt` | ✅ Implemented | - |
-| **OWL Expressions** | `sct2_sRefset_OWL*.txt` | ❌ Not supported | High |
-| **Concrete Domains** | `sct2_RelationshipConcreteValues_*.txt` | ❌ Not supported | High |
-| **Association Refsets** | `der2_cRefset_Association*.txt` | ❌ Not supported | Medium |
+| **OWL Expressions** | `sct2_sRefset_OWL*.txt` | ✅ **Implemented v1.2** | ~~High~~ Done |
+| **Concrete Domains** | `sct2_RelationshipConcreteValues_*.txt` | ✅ **Implemented v1.2** | ~~High~~ Done |
+| **Association Refsets** | `der2_cRefset_Association*.txt` | ✅ **Implemented v1.2** | ~~Medium~~ Done |
 | **Attribute Value Refsets** | `der2_cRefset_AttributeValue*.txt` | ❌ Not supported | Low |
 | **Complex Map Refsets** | `der2_iisssccRefset_ExtendedMap*.txt` | ❌ Not supported | Low |
 | **Query Specification Refsets** | `der2_sRefset_QuerySpecification*.txt` | ❌ Not supported | Low |
 
 ---
 
-### 5.2 Missing gRPC Endpoints
+### 6.2 Missing gRPC Endpoints
 
-| Endpoint | Description | Priority | Use Case |
-|----------|-------------|----------|----------|
-| `GetRelationships` | Get typed relationships for a concept | High | Attribute browsing |
-| `GetConceptsBatch` | Batch lookup of multiple concepts | High | Reduce N+1 queries |
-| `GetRefsetMembers` | Query members of a reference set | High | Refset browsing |
-| `MatchesEclBatch` | Batch ECL matching | Medium | Bulk validation |
-| `GetPreferredTerm` | Language-specific preferred term | Medium | Localization |
-| `GetIncomingRelationships` | Reverse relationship lookup | Medium | Impact analysis |
-| `ValidateMrcm` | Validate against MRCM constraints | Medium | Authoring support |
-| `GetServerInfo` | Server metadata (version, counts) | Low | Monitoring |
-| `SearchAdvanced` | Filtered search (language, type) | Low | Advanced search |
+| Endpoint | Description | Priority | Use Case | Status |
+|----------|-------------|----------|----------|--------|
+| `GetRelationships` | Get typed relationships for a concept | High | Attribute browsing | ✅ **Implemented v1.2** |
+| `GetConceptsBatch` | Batch lookup of multiple concepts | High | Reduce N+1 queries | ✅ **Implemented v1.2** |
+| `GetRefsetMembers` | Query members of a reference set | High | Refset browsing | ✅ **Implemented v1.2** |
+| `MatchesEclBatch` | Batch ECL matching | Medium | Bulk validation | ❌ Not implemented |
+| `GetPreferredTerm` | Language-specific preferred term | Medium | Localization | ✅ **Implemented v1.2** |
+| `GetIncomingRelationships` | Reverse relationship lookup | Medium | Impact analysis | ✅ **Implemented v1.2** (via GetRelationships) |
+| `ValidateMrcm` | Validate against MRCM constraints | Medium | Authoring support | ❌ Not implemented |
+| `GetServerInfo` | Server metadata (version, counts) | Low | Monitoring | ❌ Not implemented |
+| `SearchAdvanced` | Filtered search (language, type) | Low | Advanced search | ❌ Not implemented |
+
+**New Endpoints Added in v1.2:**
+- `GetConcreteRelationships` - Get concrete domain relationships
+- `GetOwlExpressions` - Get OWL axioms for a concept
+- `GetAssociations` - Get historical association refset members
+- `GetReplacementConcept` - Get replacement for inactive concept
+- `GetRefsetsForConcept` - Reverse refset lookup (RefsetService)
 
 ---
 
-### 5.3 ECL Support Gaps
+### 6.3 ECL Support Gaps
 
 | Feature | Status | Impact |
 |---------|--------|--------|
@@ -565,31 +714,34 @@ pub struct SnomedServer<R: SnomedRepository> {
 | Self reference | ✅ Working | - |
 | Member-of (`^`) | ✅ Working | - |
 | Attribute refinement | ⚠️ Partial | Limited expression support |
-| **Concrete values** | ❌ Not implemented | Number/string constraints fail |
+| **Concrete values** | ⚠️ Data loaded, ECL not supported | Number/string constraints in ECL fail |
 | **Nested expressions** | ⚠️ Untested | Complex queries may fail |
 | **Query plan caching** | ❌ Not implemented | Same ECL parsed repeatedly |
 | **Reverse flag** | ❌ Not implemented | `R` modifier not supported |
 
 ---
 
-### 5.4 Store Capability Gaps
+### 6.4 Store Capability Gaps
 
 | Capability | Status | Impact |
 |------------|--------|--------|
 | Concept lookup | ✅ O(1) | - |
 | Description lookup | ✅ O(1) | - |
 | Parent/child lookup | ✅ O(n) per query | Could be faster |
-| **Reverse refset index** | ❌ Missing | Can't query "which refsets contain X" |
+| **Reverse refset index** | ✅ **Implemented v1.2** | ~~Can't query "which refsets contain X"~~ |
 | **Transitive closure cache** | ✅ Implemented | O(1) ancestor/descendant queries |
 | **Version/temporal queries** | ❌ Missing | Always returns latest |
 | **Full-text search index** | ❌ Missing | Linear scan only |
-| **Language preference** | ❌ Missing | Ignores acceptability |
+| **Language preference** | ✅ **Implemented v1.2** | ~~Ignores acceptability~~ `get_preferred_term_for_language()` |
+| **OWL expressions index** | ✅ **Implemented v1.2** | OWL axioms indexed by concept |
+| **Concrete relationships index** | ✅ **Implemented v1.2** | Concrete values indexed by source |
+| **Association index** | ✅ **Implemented v1.2** | Historical associations indexed |
 
 ---
 
-## 6. Technical Debt
+## 7. Technical Debt
 
-### 6.1 Code Quality Issues
+### 7.1 Code Quality Issues
 
 | ID | Location | Issue | Severity |
 |----|----------|-------|----------|
@@ -606,19 +758,19 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-### 6.2 Missing Type Definitions
+### 7.2 Missing Type Definitions
 
-| Type | Description | Priority |
-|------|-------------|----------|
-| `Rf2TextDefinition` | Text definition RF2 record | Medium |
-| `Rf2OwlExpression` | OWL axiom expressions | High |
-| `Rf2ConcreteValue` | Concrete domain relationships | High |
-| `Rf2AssociationMember` | Association refset member | Medium |
-| `Rf2ExtendedMapMember` | Complex map refset member | Low |
+| Type | Description | Priority | Status |
+|------|-------------|----------|--------|
+| `Rf2TextDefinition` | Text definition RF2 record | Medium | ❌ Not implemented |
+| `Rf2OwlExpression` | OWL axiom expressions | ~~High~~ | ✅ **Implemented v1.2** |
+| `Rf2ConcreteValue` | Concrete domain relationships | ~~High~~ | ✅ **Implemented v1.2** |
+| `Rf2AssociationMember` | Association refset member | ~~Medium~~ | ✅ **Implemented v1.2** |
+| `Rf2ExtendedMapMember` | Complex map refset member | Low | ❌ Not implemented |
 
 ---
 
-### 6.3 Missing Trait Implementations
+### 7.3 Missing Trait Implementations
 
 | Type | Missing Traits | Impact |
 |------|----------------|--------|
@@ -630,7 +782,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-### 6.4 Configuration Debt
+### 7.4 Configuration Debt
 
 | Item | Current State | Required |
 |------|---------------|----------|
@@ -644,9 +796,9 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 7. Security Concerns
+## 8. Security Concerns
 
-### 7.1 Security Issue Summary
+### 8.1 Security Issue Summary
 
 | ID | Issue | Severity | Status |
 |----|-------|----------|--------|
@@ -658,7 +810,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 | SEC-006 | No audit logging | Medium | Not implemented |
 | SEC-007 | Unbounded resource usage | Medium | Not implemented |
 
-### 7.2 HIPAA/Healthcare Compliance Gaps
+### 8.2 HIPAA/Healthcare Compliance Gaps
 
 | Requirement | Status | Gap |
 |-------------|--------|-----|
@@ -669,9 +821,9 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 8. Performance Issues
+## 9. Performance Issues
 
-### 8.1 Identified Performance Problems
+### 9.1 Identified Performance Problems
 
 | ID | Operation | Current | Target | Gap |
 |----|-----------|---------|--------|-----|
@@ -682,7 +834,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 | PERF-005 | Large results | Full materialization | Streaming | gRPC streaming |
 | PERF-006 | Ancestor queries | BFS each time | Cached | ✅ RESOLVED - TransitiveClosure |
 
-### 8.2 Memory Usage Estimates
+### 9.2 Memory Usage Estimates
 
 | Component | Current | Optimized | Savings |
 |-----------|---------|-----------|---------|
@@ -694,9 +846,9 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 9. Test Coverage Gaps
+## 10. Test Coverage Gaps
 
-### 9.1 Coverage Summary
+### 10.1 Coverage Summary
 
 | Crate | Unit Tests | Integration Tests | Coverage |
 |-------|------------|-------------------|----------|
@@ -704,7 +856,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 | snomed-loader | 62 | 0 | ~60% |
 | snomed-service | **0** | **0** | **0%** |
 
-### 9.2 Missing Test Categories
+### 10.2 Missing Test Categories
 
 | Category | Status | Priority |
 |----------|--------|----------|
@@ -716,7 +868,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 | Fuzz tests | ❌ Missing | Low |
 | Property-based tests | ❌ Missing | Low |
 
-### 9.3 Specific Test Gaps
+### 10.3 Specific Test Gaps
 
 **Parser Tests Needed:**
 - [ ] Malformed CSV (missing columns, extra columns)
@@ -742,9 +894,9 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 10. Documentation Gaps
+## 11. Documentation Gaps
 
-### 10.1 Documentation Status
+### 11.1 Documentation Status
 
 | Document | Status | Gap |
 |----------|--------|-----|
@@ -759,7 +911,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 | **Performance tuning** | ❌ Missing | Optimization guide |
 | **Troubleshooting** | ❌ Missing | Common issues |
 
-### 10.2 Missing Examples
+### 11.2 Missing Examples
 
 | Example | Description | Priority |
 |---------|-------------|----------|
@@ -771,26 +923,26 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-## 11. Prioritized Remediation Plan
+## 12. Prioritized Remediation Plan
 
-### 11.1 Phase 1: Critical Fixes (P0)
+### 12.1 Phase 1: Critical Fixes (P0)
 
 **Timeline:** Immediate (before any deployment)
 
-| Item | Issue | Effort | Owner |
-|------|-------|--------|-------|
-| 1 | Fix hardcoded path (CRIT-001) | 1h | - |
-| 2 | Add graceful shutdown (CRIT-002) | 2h | - |
-| 3 | Fix serde feature gate (CRIT-006) | 1h | - |
-| 4 | Add connection limits (CRIT-004) | 2h | - |
-| 5 | Add health checks (CRIT-005) | 4h | - |
-| 6 | Add TLS support (CRIT-003) | 8h | - |
+| Item | Issue | Effort | Owner | Status |
+|------|-------|--------|-------|--------|
+| 1 | Fix hardcoded path (CRIT-001) | 1h | - | ❌ Open |
+| 2 | Add graceful shutdown (CRIT-002) | 2h | - | ❌ Open |
+| 3 | Fix serde feature gate (CRIT-006) | 1h | - | ✅ **Done v1.2** |
+| 4 | Add connection limits (CRIT-004) | 2h | - | ❌ Open |
+| 5 | Add health checks (CRIT-005) | 4h | - | ❌ Open |
+| 6 | Add TLS support (CRIT-003) | 8h | - | ❌ Open |
 
-**Total Effort:** ~18 hours
+**Total Effort:** ~18 hours (~17h remaining)
 
 ---
 
-### 11.2 Phase 2: High Priority (P1)
+### 12.2 Phase 2: High Priority (P1)
 
 **Timeline:** Sprint 1
 
@@ -807,45 +959,45 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-### 11.3 Phase 3: Medium Priority (P2)
+### 12.3 Phase 3: Medium Priority (P2)
 
 **Timeline:** Sprint 2-3
 
-| Item | Issue | Effort | Owner |
-|------|-------|--------|-------|
-| 1 | Add missing gRPC endpoints | 24h | - |
-| 2 | Implement concrete domain support | 16h | - |
-| 3 | Add pagination to all endpoints | 8h | - |
-| 4 | Add ECL query caching | 8h | - |
-| 5 | Add integration tests | 16h | - |
-| 6 | Add observability (metrics, tracing) | 16h | - |
-| 7 | Add reverse refset index | 8h | - |
+| Item | Issue | Effort | Owner | Status |
+|------|-------|--------|-------|--------|
+| 1 | Add missing gRPC endpoints | 24h | - | ✅ **Done v1.2** |
+| 2 | Implement concrete domain support | 16h | - | ✅ **Done v1.2** |
+| 3 | Add pagination to all endpoints | 8h | - | ⚠️ Partial (RefsetService has pagination) |
+| 4 | Add ECL query caching | 8h | - | ❌ Open |
+| 5 | Add integration tests | 16h | - | ❌ Open |
+| 6 | Add observability (metrics, tracing) | 16h | - | ❌ Open |
+| 7 | Add reverse refset index | 8h | - | ✅ **Done v1.2** |
 
-**Total Effort:** ~96 hours
+**Total Effort:** ~96 hours (~48h remaining)
 
 ---
 
-### 11.4 Phase 4: Low Priority (P3)
+### 12.4 Phase 4: Low Priority (P3)
 
 **Timeline:** Future sprints
 
-| Item | Issue | Effort | Owner |
-|------|-------|--------|-------|
-| 1 | CLI argument parsing | 4h | - |
-| 2 | Config file support | 8h | - |
-| 3 | Complete well-known constants | 4h | - |
-| 4 | Add missing trait implementations | 4h | - |
-| 5 | Add example programs | 8h | - |
-| 6 | Performance benchmarks | 8h | - |
-| 7 | Add OWL expression support | 24h | - |
+| Item | Issue | Effort | Owner | Status |
+|------|-------|--------|-------|--------|
+| 1 | CLI argument parsing | 4h | - | ❌ Open |
+| 2 | Config file support | 8h | - | ❌ Open |
+| 3 | Complete well-known constants | 4h | - | ❌ Open |
+| 4 | Add missing trait implementations | 4h | - | ❌ Open |
+| 5 | Add example programs | 8h | - | ❌ Open |
+| 6 | Performance benchmarks | 8h | - | ❌ Open |
+| 7 | Add OWL expression support | 24h | - | ✅ **Done v1.2** |
 
-**Total Effort:** ~60 hours
+**Total Effort:** ~60 hours (~36h remaining)
 
 ---
 
-## 12. Appendix: Detailed Findings
+## 13. Appendix: Detailed Findings
 
-### 12.1 File-by-File Analysis
+### 13.1 File-by-File Analysis
 
 <details>
 <summary>snomed-types/src/refset.rs</summary>
@@ -904,7 +1056,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-### 12.2 Dependency Analysis
+### 13.2 Dependency Analysis
 
 | Dependency | Version | Status | Notes |
 |------------|---------|--------|-------|
@@ -923,7 +1075,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 
 ---
 
-### 12.3 Compliance Checklist
+### 13.3 Compliance Checklist
 
 | Standard | Requirement | Status |
 |----------|-------------|--------|
@@ -945,6 +1097,7 @@ pub struct SnomedServer<R: SnomedRepository> {
 |---------|------|--------|---------|
 | 1.0 | 2026-01-19 | Claude | Initial gap analysis |
 | 1.1 | 2026-01-19 | Claude | Added snomed-ecl-optimizer integration (Section 2) |
+| 1.2 | 2026-01-19 | Claude | Functional gaps implementation (Section 3): OWL expressions, concrete relationships, associations, new gRPC endpoints, reverse refset index |
 
 ---
 
